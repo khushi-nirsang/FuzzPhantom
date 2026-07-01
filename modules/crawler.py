@@ -233,6 +233,17 @@ async def crawl(ctx: ScanContext, start_urls: list[str] | None = None) -> None:
                     continue
                 if not _is_same_domain(clean, root_domain):
                     continue
+                
+                # Dynamic subdirectory path scope restriction
+                target_parsed = urlparse(ctx.target_domain)
+                target_path = target_parsed.path.rstrip("/")
+                if target_path and target_path != "":
+                    clean_parsed = urlparse(clean)
+                    clean_path = clean_parsed.path.rstrip("/")
+                    if not clean_path.startswith(target_path):
+                        # Outside scope path restriction
+                        continue
+
                 if _is_static(clean):
                     continue
                 if depth > ctx.crawl_depth:

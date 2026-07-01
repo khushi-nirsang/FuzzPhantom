@@ -119,10 +119,18 @@ async def run_scan(config: Any, queue: asyncio.Queue) -> None:
             payload_dir = ROOT / "payloads"
             payload_files = [str(f) for f in payload_dir.glob("*.txt")]
 
+        # Determine if we have a directory path scope (e.g. /book)
+        from urllib.parse import urlparse
+        parsed_target = urlparse(config.domain.strip())
+        has_path_scope = bool(parsed_target.path and parsed_target.path != "/")
+
+        # Automatically disable subdomains if a path scope is specified (to stay folder-locked)
+        should_run_subdomains = config.run_subdomains and not has_path_scope
+
         ctx = GUIScanContext(
             queue=queue,
-            target_domain=config.domain.strip().lower(),
-            domains=[config.domain.strip().lower()],
+            target_domain=config.domain.strip(),
+            domains=[config.domain.strip()],
             wordlist_path=config.wordlist or str(ROOT / "wordlists" / "subdomains.txt"),
             payload_files=payload_files,
             output_formats=config.output_formats or ["json", "hackerone"],
@@ -135,12 +143,17 @@ async def run_scan(config: Any, queue: asyncio.Queue) -> None:
             smart_wordlist=config.run_smart_wordlist,
         )
 
-        if config.run_subdomains:
+        if should_run_subdomains:
             stage("subdomains", "Subdomain discovery in progress...")
             log("Starting subdomain discovery (CT logs + DNS brute-force + zone transfer)")
             from modules.subdomain import run_subdomain_discovery
             await run_subdomain_discovery(ctx)
             log(f"Subdomains complete — {len(ctx.subdomains)} discovered")
+        else:
+            if has_path_scope:
+                log("Path scope directory detected. Skipping subdomain discovery to lock scan to folder.")
+            else:
+                log("Subdomain discovery disabled by configuration.")
 
         if config.run_crawl:
             stage("crawl", "URL crawling in progress...")
