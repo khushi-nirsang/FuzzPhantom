@@ -122,7 +122,11 @@ async def ws_endpoint(websocket: WebSocket, scan_id: str):
                     await websocket.send_json({"type": "complete", "text": "Scan finished."})
                     break
     except WebSocketDisconnect:
-        pass
+        # Client closed browser/tab -> shut down the server cleanly
+        logger.info("Browser disconnected. Shutting down server...")
+        import os
+        import signal
+        os.kill(os.getpid(), signal.SIGTERM)
     except Exception:
         pass
 
