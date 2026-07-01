@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+ENV/
+env/
+.idea/
+.vscode/
+
+# Ignore local scans and database files
+reports/scan_*.db
+reports/fuzzphantom_*.json
+reports/hackerone_*.md
+reports/bugcrowd_*.md
+reports/intigriti_*.md

