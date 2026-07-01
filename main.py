@@ -76,6 +76,11 @@ Examples:
         metavar="FILE",
         help="File containing list of domains (one per line)",
     )
+    target_group.add_argument(
+        "-U", "--url-list",
+        metavar="FILE",
+        help="File containing list of URLs to fuzz directly (one per line)",
+    )
 
     # ── Module Selection ─────────────────────────────────────────────────────
     module_group = parser.add_argument_group("Modules")
@@ -232,6 +237,25 @@ def build_context(args: argparse.Namespace) -> ScanContext:
         if not ctx.target_domain and extra_domains:
             ctx.target_domain = extra_domains[0]
 
+    if args.url_list:
+        url_file = Path(args.url_list)
+        if not url_file.exists():
+            logger.error(f"URL list file not found: {args.url_list}")
+            sys.exit(1)
+        with open(url_file, encoding="utf-8") as f:
+            input_urls = [
+                line.strip()
+                for line in f
+                if line.strip() and not line.startswith("#")
+            ]
+        ctx.parameterized_urls.extend(input_urls)
+        ctx.crawled_urls.extend(input_urls)
+        if not ctx.target_domain and input_urls:
+            from urllib.parse import urlparse
+            parsed = urlparse(input_urls[0])
+            ctx.target_domain = f"{parsed.scheme}://{parsed.netloc}"
+            ctx.domains = [ctx.target_domain]
+
     # Wordlists & payloads
     ctx.wordlist_path = args.wordlist or str(ROOT / "wordlists" / "subdomains.txt")
     ctx.payload_files = args.payloads or []
@@ -311,10 +335,10 @@ async def run(args: argparse.Namespace) -> None:
         print_banner()
 
     # Validate target
-    if not args.domain and not args.domain_list:
+    if not args.domain and not args.domain_list and not args.url_list:
         console.print(
             Panel(
-                "[bold red]Error:[/bold red] You must specify a target domain with [bold]-d[/bold] or [bold]-D[/bold].\n\n"
+                "[bold red]Error:[/bold red] You must specify a target with [bold]-d[/bold], [bold]-D[/bold], or [bold]-U[/bold].\n\n"
                 "Run [bold]python main.py --help[/bold] for usage.",
                 title="FuzzPhantom",
                 border_style="red",
@@ -329,6 +353,9 @@ async def run(args: argparse.Namespace) -> None:
         args.fuzz = True
         args.api = True
         args.smart_wordlist = True
+
+    if args.url_list and not (args.subdomains or args.crawl or args.fuzz or args.api):
+        args.fuzz = True
 
     ctx = build_context(args)
 

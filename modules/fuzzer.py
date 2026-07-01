@@ -167,8 +167,29 @@ async def run_fuzzer(ctx: ScanContext) -> None:
         return
 
     urls = ctx.parameterized_urls
+    if not urls and ctx.crawled_urls:
+        logger.info("No parameterized URLs found. Constructing test candidates using common parameters...")
+        param_wordlist = Path(__file__).parent.parent / "wordlists" / "params.txt"
+        common_params = []
+        if param_wordlist.exists():
+            with open(param_wordlist, encoding="utf-8", errors="ignore") as f:
+                common_params = [line.strip() for line in f if line.strip() and not line.startswith("#")][:30]
+        if not common_params:
+            common_params = ["id", "file", "page", "path", "url", "redirect", "dir", "cmd"]
+
+        constructed_urls = []
+        for url in ctx.crawled_urls:
+            parsed = urlparse(url)
+            if not parsed.query:
+                for param in common_params:
+                    separator = "&" if parsed.query else "?"
+                    constructed_urls.append(f"{url.rstrip('/')}{separator}{param}=1")
+            else:
+                constructed_urls.append(url)
+        urls = list(set(constructed_urls))
+
     if not urls:
-        logger.warning("No parameterized URLs to fuzz. Run crawler first.")
+        logger.warning("No URLs to fuzz. Run crawler first or specify a URL list.")
         return
 
     logger.info(
