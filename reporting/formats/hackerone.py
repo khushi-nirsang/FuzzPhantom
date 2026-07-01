@@ -78,7 +78,8 @@ def export_hackerone(ctx: ScanContext, output_dir: str) -> str:
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = out_dir / f"hackerone_{ctx.target_domain}_{timestamp}.md"
+    clean_target = ctx.target_domain.replace("https://", "").replace("http://", "").replace(":", "_").replace("/", "_").replace("\\", "_")
+    filename = out_dir / f"hackerone_{clean_target}_{timestamp}.md"
 
     summary = ctx.summary()
     findings_md = "\n".join(

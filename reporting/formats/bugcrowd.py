@@ -57,8 +57,8 @@ def export_bugcrowd(ctx: ScanContext, output_dir: str) -> str:
     """Generate a Bugcrowd-formatted Markdown report."""
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = out_dir / f"bugcrowd_{ctx.target_domain}_{timestamp}.md"
+    clean_target = ctx.target_domain.replace("https://", "").replace("http://", "").replace(":", "_").replace("/", "_").replace("\\", "_")
+    filename = out_dir / f"bugcrowd_{clean_target}_{timestamp}.md"
 
     summary = ctx.summary()
     findings_md = "\n".join(

@@ -21,7 +21,8 @@ def export_json(ctx: ScanContext, output_dir: str) -> str:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = out_dir / f"fuzzphantom_{ctx.target_domain}_{timestamp}.json"
+    clean_target = ctx.target_domain.replace("https://", "").replace("http://", "").replace(":", "_").replace("/", "_").replace("\\", "_")
+    filename = out_dir / f"fuzzphantom_{clean_target}_{timestamp}.json"
 
     data = {
         "meta": {
