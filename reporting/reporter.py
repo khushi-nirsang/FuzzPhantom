@@ -8,6 +8,8 @@ from __future__ import annotations
 from core.context import ScanContext
 from core.logger import get_logger, console
 from reporting.json_export import export_json
+from reporting.flat_exports import export_csv, export_jsonl
+from reporting.pdf_export import export_pdf
 from reporting.formats.hackerone import export_hackerone
 from reporting.formats.bugcrowd import export_bugcrowd
 from reporting.formats.intigriti import export_intigriti
@@ -16,6 +18,9 @@ logger = get_logger(__name__)
 
 FORMAT_DISPATCH = {
     "json": export_json,
+    "jsonl": export_jsonl,
+    "csv": export_csv,
+    "pdf": export_pdf,
     "hackerone": export_hackerone,
     "bugcrowd": export_bugcrowd,
     "intigriti": export_intigriti,

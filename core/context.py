@@ -60,20 +60,66 @@ class ScanContext:
 
     # ── Options ──────────────────────────────────────────────────────────────
     wordlist_path: str = ""
+    dir_wordlist_path: str = ""
+    dir_depth: int = 3
+    dir_extensions: list[str] = field(default_factory=list)
+    auto_calibration: bool = True
+    calibration_samples: int = 6
+    calibration_size_tolerance: int = 200
+    calibration_profile: str = "balanced"
+    fuzz_wordlists: dict[str, list[str]] = field(default_factory=dict)
+    fuzz_mode: str = "sniper"
+    mutate_wordlist: bool = False
+    mutate_depth: int = 1
+    request_method: str = "GET"
+    request_headers: dict[str, str] = field(default_factory=dict)
+    request_body: str = ""
+    follow_redirects: bool = False
+    recursion_status: str | None = None
+    recursion_match: str | None = None
+    recursion_filter: str | None = None
     payload_files: list[str] = field(default_factory=list)
     output_formats: list[str] = field(default_factory=list)
     output_dir: str = "reports"
     crawl_depth: int = 3
-    rate_limit: int = 50            # requests per second
-    threads: int = 20
+    rate_limit: int = 200           # requests per second
+    threads: int = 80
     timeout: int = 10
+    delay_ms: int = 0
+    jitter_ms: int = 0
+    max_errors: int = 0
+    max_hits: int = 0
     user_agent: str = (
         "Mozilla/5.0 (compatible; FuzzPhantom/1.0; +https://github.com/fuzzphantom)"
     )
     proxy: str | None = None        # e.g. "http://127.0.0.1:8080"
+    proxy_max_failures: int = 3
+    replay_proxy: str | None = None  # Send confirmed hits to Burp/ZAP without proxying all traffic
     dry_run: bool = False
     verbose: bool = False
+    quiet: bool = False
+    output_only_urls: bool = False
+    resume: bool = False
+    resume_file: str = ""
     smart_wordlist: bool = False
+
+    # ── Matchers & Filters (ffuf-style) ──────────────────────────────────────
+    match_status: str | None = None
+    filter_status: str | None = None
+    match_size: str | None = None
+    filter_size: str | None = None
+    match_words: str | None = None
+    filter_words: str | None = None
+    match_lines: str | None = None
+    filter_lines: str | None = None
+    match_time: str | None = None
+    filter_time: str | None = None
+    match_regex: str | None = None
+    filter_regex: str | None = None
+    match_header: str | None = None
+    filter_header: str | None = None
+    match_content_type: str | None = None
+    filter_content_type: str | None = None
 
     # ── Discovered data ──────────────────────────────────────────────────────
     subdomains: list[str] = field(default_factory=list)
@@ -91,6 +137,10 @@ class ScanContext:
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        self.configure_storage()
+
+    def configure_storage(self) -> None:
+        """Create or refresh the SQLite storage path from current context values."""
         import os
         from pathlib import Path
         os.makedirs(self.output_dir, exist_ok=True)
@@ -253,6 +303,6 @@ class ScanContext:
             "parameterized_urls": len(self.parameterized_urls),
             "api_endpoints": len(self.api_endpoints),
             "js_files": len(self.js_files),
+            "directories": sum(1 for f in self.findings if f.category == "Directory Found"),
             "findings": len(self.findings),
         }
-

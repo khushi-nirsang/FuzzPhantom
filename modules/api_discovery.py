@@ -132,46 +132,111 @@ async def _probe_endpoint(
             logger.debug(f"Probe error {url}: {exc}")
 
 
+async def _probe_endpoint_candidates(
+    js_routes: set[str],
+    hosts: list[str],
+    wordlist_paths: list[str],
+    session: FuzzSession,
+    ctx: ScanContext,
+    semaphore: asyncio.Semaphore,
+) -> int:
+    """Probe API candidates with bounded workers instead of one task per URL."""
+    worker_count = max(1, ctx.threads)
+    queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=worker_count * 4)
+    seen: set[str] = set()
+    enqueued = 0
+
+    async def worker() -> None:
+        while True:
+            url = await queue.get()
+            try:
+                if url is None:
+                    return
+                await _probe_endpoint(url, session, ctx, semaphore)
+            finally:
+                queue.task_done()
+
+    async def enqueue(url: str) -> None:
+        nonlocal enqueued
+        if url in seen:
+            return
+        seen.add(url)
+        enqueued += 1
+        await queue.put(url)
+
+    workers = [asyncio.create_task(worker()) for _ in range(worker_count)]
+
+    for route in js_routes:
+        await enqueue(route)
+
+    for host in hosts:
+        for path in wordlist_paths:
+            url = urljoin(host.rstrip("/") + "/", path.lstrip("/"))
+            await enqueue(url)
+
+    for _ in workers:
+        await queue.put(None)
+
+    await queue.join()
+    await asyncio.gather(*workers)
+    return enqueued
+
+
+async def _fetch_and_analyze_single_js(
+    js_url: str,
+    session: FuzzSession,
+    ctx: ScanContext,
+) -> set[str]:
+    try:
+        resp = await session.get(js_url)
+        if resp is None:
+            return set()
+        async with resp:
+            if resp.status >= 400:
+                return set()
+            content = await resp.text(errors="replace")
+    except Exception as exc:
+        logger.debug(f"JS fetch error {js_url}: {exc}")
+        return set()
+
+    routes, creds = _analyze_js(content, js_url)
+    logger.info(
+        f"  JS: [cyan]{js_url}[/cyan] → "
+        f"{len(routes)} routes, {len(creds)} credentials"
+    )
+
+    for cred in creds:
+        log_finding("JS Credential Leak", js_url, cred, "CRITICAL")
+        ctx.add_finding(
+            Finding(
+                category="Credential Leak (JS)",
+                url=js_url,
+                severity="CRITICAL",
+                detail=cred,
+                evidence=cred,
+            )
+        )
+    return routes
+
+
 async def analyze_js_files(ctx: ScanContext, session: FuzzSession) -> set[str]:
     """
     Fetch and analyze all known JS files from the crawl.
     Returns set of discovered API routes.
     """
     console.rule("[bold cyan]JavaScript Analysis[/bold cyan]")
-    all_routes: set[str] = set()
+    if not ctx.js_files:
+        return set()
 
-    for js_url in ctx.js_files:
-        try:
-            resp = await session.get(js_url)
-            if resp is None:
-                continue
-            async with resp:
-                if resp.status >= 400:
-                    continue
-                content = await resp.text(errors="replace")
-        except Exception as exc:
-            logger.debug(f"JS fetch error {js_url}: {exc}")
-            continue
+    tasks = [
+        _fetch_and_analyze_single_js(js_url, session, ctx)
+        for js_url in ctx.js_files
+    ]
+    results = await asyncio.gather(*tasks)
 
-        routes, creds = _analyze_js(content, js_url)
+    all_routes = set()
+    for routes in results:
         all_routes.update(routes)
-
-        logger.info(
-            f"  JS: [cyan]{js_url}[/cyan] → "
-            f"{len(routes)} routes, {len(creds)} credentials"
-        )
-
-        for cred in creds:
-            log_finding("JS Credential Leak", js_url, cred, "CRITICAL")
-            ctx.add_finding(
-                Finding(
-                    category="Credential Leak (JS)",
-                    url=js_url,
-                    severity="CRITICAL",
-                    detail=cred,
-                    evidence=cred,
-                )
-            )
 
     return all_routes
 
@@ -200,22 +265,17 @@ async def run_api_discovery(ctx: ScanContext) -> None:
         logger.info(f"JS analysis found [bold]{len(js_routes)}[/bold] routes")
 
         # Step 2: Probe JS-discovered routes
-        probe_targets: list[str] = list(js_routes)
+        estimated_targets = len(js_routes) + (len(hosts) * len(wordlist_paths))
+        probe_targets = range(estimated_targets)
 
         # Step 3: Build probe list from wordlist × all hosts
-        for host in hosts:
-            for path in wordlist_paths:
-                url = urljoin(host.rstrip("/") + "/", path.lstrip("/"))
-                probe_targets.append(url)
-
         logger.info(
             f"Probing [bold]{len(probe_targets)}[/bold] API endpoint candidates…"
         )
-        tasks = [
-            _probe_endpoint(url, session, ctx, semaphore)
-            for url in probe_targets
-        ]
-        await asyncio.gather(*tasks)
+        enqueued = await _probe_endpoint_candidates(
+            js_routes, hosts, wordlist_paths, session, ctx, semaphore
+        )
+        logger.info(f"Queued [bold]{enqueued}[/bold] unique API endpoint candidates")
 
     logger.info(
         f"[bold green]API discovery complete.[/bold green] "

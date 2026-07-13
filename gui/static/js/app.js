@@ -1,65 +1,59 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   FuzzPhantom GUI — Dashboard JavaScript
+   FuzzPhantom — Dashboard Application Logic v2.0
    ═══════════════════════════════════════════════════════════════════════════ */
 
 'use strict';
 
-// ─── State ──────────────────────────────────────────────────────────────────
-const state = {
-  scanId:        null,
-  ws:            null,
-  running:       false,
-  findings:      [],       // all findings received
-  logEntries:    [],       // all log entries
-  logFilter:     'ALL',
-  sevFilter:     'ALL',
-  page:          0,
-  pageSize:      50,
-  stats: { subdomains:0, crawled_urls:0, parameterized_urls:0,
-           api_endpoints:0, js_files:0, findings:0 },
-  sevCounts: { CRITICAL:0, HIGH:0, MEDIUM:0, LOW:0, INFO:0 },
+// ── State ────────────────────────────────────────────────────────────────────
+const S = {
+  ws:           null,
+  scanId:       null,
+  running:      false,
+  subdomains:   [],
+  urls:         [],
+  directories:  [],   // {url, status, size, elapsed_ms, severity, detail}
+  apiEndpoints: [],
+  findings:     [],   // all security findings (excludes Directory Found)
+  logs:         [],
+  currentTab:   'overview',
+  logFilter:    'ALL',
+  findingsSev:  'ALL',
+  dirsFilter:   'ALL',
+  findingsPage: 1,
+  FIND_PER_PG:  25,
+  chart:        null,
+  completedStages: new Set(),
+  activeStage:  null,
 };
 
-// ─── Chart ──────────────────────────────────────────────────────────────────
-let sevChart = null;
+const PIPE_STAGES = ['subdomains','crawl','dir_fuzz','fuzz','api','wordlist','reports'];
 
+// ── Init ─────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  initChart();
+  loadReports();
+  // Restore last target
+  const saved = localStorage.getItem('fp_target');
+  if (saved) document.getElementById('input-domain').value = saved;
+});
+
+// ── Chart ────────────────────────────────────────────────────────────────────
 function initChart() {
   const ctx = document.getElementById('sev-chart').getContext('2d');
-  sevChart = new Chart(ctx, {
+  S.chart = new Chart(ctx, {
     type: 'doughnut',
     data: {
       labels: ['Critical','High','Medium','Low','Info'],
       datasets: [{
         data: [0,0,0,0,0],
-        backgroundColor: [
-          'rgba(255,34,68,0.85)',
-          'rgba(255,106,0,0.85)',
-          'rgba(255,214,0,0.85)',
-          'rgba(0,212,255,0.85)',
-          'rgba(100,116,139,0.85)',
-        ],
-        borderColor: [
-          'rgba(255,34,68,1)',
-          'rgba(255,106,0,1)',
-          'rgba(255,214,0,1)',
-          'rgba(0,212,255,1)',
-          'rgba(100,116,139,1)',
-        ],
-        borderWidth: 2,
-        hoverOffset: 6,
+        backgroundColor: ['#ef4444','#f97316','#f59e0b','#22c55e','#06b6d4'],
+        borderColor: '#0c1325', borderWidth: 3, hoverBorderWidth: 3,
       }],
     },
     options: {
-      cutout: '68%',
+      cutout: '72%', responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: {
-        backgroundColor: 'rgba(10,12,26,0.95)',
-        borderColor: 'rgba(0,212,255,0.3)',
-        borderWidth: 1,
-        titleColor: '#e2e8f0',
-        bodyColor: '#94a3b8',
-        callbacks: {
-          label: ctx => ` ${ctx.label}: ${ctx.parsed.toLocaleString()}`,
-        },
+        callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed}` }
       }},
       animation: { duration: 400 },
     },
@@ -67,491 +61,773 @@ function initChart() {
 }
 
 function updateChart() {
-  if (!sevChart) return;
-  const { CRITICAL=0, HIGH=0, MEDIUM=0, LOW=0, INFO=0 } = state.sevCounts;
-  sevChart.data.datasets[0].data = [CRITICAL, HIGH, MEDIUM, LOW, INFO];
-  sevChart.update('none');
-  const total = CRITICAL+HIGH+MEDIUM+LOW+INFO;
-  document.getElementById('chart-total').textContent = total.toLocaleString();
+  const sev = countBySeverity(S.findings);
+  S.chart.data.datasets[0].data = [
+    sev.CRITICAL, sev.HIGH, sev.MEDIUM, sev.LOW, sev.INFO,
+  ];
+  S.chart.update('active');
+  animateNum('chart-total', S.findings.length);
 }
 
-// ─── Stat counter animation ──────────────────────────────────────────────────
-const _counterTimers = {};
-function animateCounter(elId, target) {
-  const el = document.getElementById(elId);
-  if (!el) return;
-  if (_counterTimers[elId]) cancelAnimationFrame(_counterTimers[elId]);
-  const start = parseInt(el.textContent.replace(/,/g,'')) || 0;
-  if (start === target) return;
-  const dur = Math.min(600, Math.max(200, Math.abs(target - start) * 2));
-  const t0 = performance.now();
-  function tick(now) {
-    const p = Math.min((now - t0) / dur, 1);
-    const ease = 1 - Math.pow(1 - p, 3);
-    el.textContent = Math.round(start + (target - start) * ease).toLocaleString();
-    if (p < 1) _counterTimers[elId] = requestAnimationFrame(tick);
-  }
-  _counterTimers[elId] = requestAnimationFrame(tick);
+// ── Module Toggles ────────────────────────────────────────────────────────────
+function onModuleToggle(mod, el) {
+  const card = document.getElementById('card-' + mod);
+  card.classList.toggle('mod-active', el.checked);
 }
 
-function updateStats(stats) {
-  Object.assign(state.stats, stats);
-  animateCounter('stat-subdomains', stats.subdomains || 0);
-  animateCounter('stat-urls',       stats.crawled_urls || 0);
-  animateCounter('stat-api',        stats.api_endpoints || 0);
-  animateCounter('stat-findings',   stats.findings || 0);
+function toggleModuleExpand(mod) { /* future: show sub-options */ }
+
+function selectAllModules() {
+  ['subdomains','crawl','dir_fuzz','fuzz','api','wordlist'].forEach(m => {
+    const cb = document.getElementById('mod-' + m);
+    if (cb) { cb.checked = true; onModuleToggle(m, cb); }
+  });
+}
+function clearAllModules() {
+  ['subdomains','crawl','dir_fuzz','fuzz','api','wordlist'].forEach(m => {
+    const cb = document.getElementById('mod-' + m);
+    if (cb) { cb.checked = false; onModuleToggle(m, cb); }
+  });
 }
 
-function updateSevCounters() {
-  animateCounter('stat-critical', state.sevCounts.CRITICAL || 0);
-  animateCounter('stat-high',     state.sevCounts.HIGH || 0);
-  document.getElementById('findings-count').textContent =
-    state.findings.length.toLocaleString();
+// ── Multi-Target ──────────────────────────────────────────────────────────────
+function toggleMultiTarget() {
+  const panel = document.getElementById('multi-target-panel');
+  const btn   = document.getElementById('btn-multi-toggle');
+  const open  = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : 'block';
+  btn.textContent = open ? '＋ Add multiple targets' : '－ Hide extra targets';
+  btn.style.borderColor = open ? 'var(--border)' : 'var(--accent)';
+  btn.style.color = open ? 'var(--text-muted)' : 'var(--accent)';
 }
 
-// ─── Status UI ───────────────────────────────────────────────────────────────
-function setStatus(status, label) {
-  const dot   = document.getElementById('status-dot');
-  const lbl   = document.getElementById('status-label');
-  dot.className = `status-dot ${status}`;
-  lbl.textContent = label;
+// ── Advanced Panel ────────────────────────────────────────────────────────────
+function toggleAdvanced() {
+  const body  = document.getElementById('adv-body');
+  const arrow = document.getElementById('adv-arrow');
+  const open  = !body.classList.contains('hidden');
+  body.classList.toggle('hidden', open);
+  arrow.classList.toggle('open', !open);
 }
 
-function setStage(stageName) {
-  const badge = document.getElementById('stage-badge');
-  if (!stageName) { badge.style.display = 'none'; return; }
-  badge.style.display = '';
-  badge.textContent = stageName.replace(/_/g,' ');
+// ── Format Toggles ────────────────────────────────────────────────────────────
+function toggleFmt(id) {
+  const cb  = document.getElementById('fmt-' + id);
+  const lbl = document.getElementById('fmt-' + id + '-lbl');
+  cb.checked = !cb.checked;
+  lbl.classList.toggle('checked', cb.checked);
 }
 
-// ─── WebSocket ───────────────────────────────────────────────────────────────
-function connectWS(scanId) {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const ws = new WebSocket(`${proto}://${location.host}/ws/${scanId}`);
-  state.ws = ws;
-
-  ws.onopen = () => console.log('[WS] connected');
-  ws.onmessage = e => handleMsg(JSON.parse(e.data));
-  ws.onerror   = e => appendLog({type:'log', level:'ERROR', text:'WebSocket error', ts: now(), src:'ws'});
-  ws.onclose   = () => {
-    if (state.running) {
-      setStatus('error', 'Disconnected');
-      state.running = false;
-      setScanBtn(false);
-    }
-  };
+function toggleOptionCheckbox(id) {
+  const cb = document.getElementById(id);
+  const lbl = document.getElementById(id + '-lbl');
+  cb.checked = !cb.checked;
+  lbl.classList.toggle('checked', cb.checked);
 }
 
-function now() {
-  return new Date().toTimeString().slice(0,8);
+// ── Tab Switching ─────────────────────────────────────────────────────────────
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-' + name).classList.add('active');
+  S.currentTab = name;
+  if (name === 'reports') loadReports();
+  if (name === 'subdomains') renderSimpleList('subdomains');
+  if (name === 'urls') renderSimpleList('urls');
+  if (name === 'api') renderSimpleList('api');
+  if (name === 'dirs') renderDirs();
+  if (name === 'findings') renderFindings();
 }
 
-function handleMsg(msg) {
-  switch (msg.type) {
-    case 'log':
-      appendLog(msg);
-      break;
-    case 'finding':
-      addFinding(msg.finding);
-      break;
-    case 'stats':
-      updateStats(msg.stats);
-      updateChart();
-      break;
-    case 'stage':
-      setStage(msg.stage);
-      appendLog({type:'log', level:'INFO', text:`>> ${msg.text}`, ts: now(), src:'stage'});
-      break;
-    case 'complete':
-      onScanComplete(msg);
-      break;
-    case 'error':
-      appendLog({type:'log', level:'ERROR', text: msg.text, ts: now(), src:'error'});
-      onScanEnd('error', 'Error');
-      break;
-    case 'stopped':
-      appendLog({type:'log', level:'WARNING', text: msg.text || 'Stopped', ts: now(), src:'scan'});
-      onScanEnd('stopped', 'Stopped');
-      break;
-    case 'ping':
-      break; // keepalive, ignore
-    default:
-      break;
-  }
-}
-
-function onScanComplete(msg) {
-  appendLog({type:'log', level:'INFO', text: msg.text || 'Scan complete.', ts: now(), src:'scan'});
-  if (msg.summary) updateStats(msg.summary);
-  updateChart();
-  updateFindingsTable();
-  onScanEnd('done', 'Complete');
-  setStage(null);
-  loadReports();
-
-  // Auto-switch to findings if any
-  if (state.findings.length > 0) {
-    setTimeout(() => switchTab('findings', document.querySelector('[data-tab="findings"]')), 800);
-  }
-}
-
-function onScanEnd(statusClass, label) {
-  state.running = false;
-  setStatus(statusClass, label);
-  setScanBtn(false);
-  setStage(null);
-  document.getElementById('btn-clear').style.display = '';
-}
-
-// ─── Scan control ────────────────────────────────────────────────────────────
-async function handleScanButton() {
-  if (state.running) {
-    await stopScan();
-  } else {
-    await startScan();
-  }
+// ── Scan Control ──────────────────────────────────────────────────────────────
+async function handleScan() {
+  if (S.running) { await stopScan(); return; }
+  await startScan();
 }
 
 async function startScan() {
   const domain = document.getElementById('input-domain').value.trim();
-  if (!domain) {
-    document.getElementById('input-domain').focus();
-    document.getElementById('input-domain').style.borderColor = 'var(--danger)';
-    setTimeout(() => document.getElementById('input-domain').style.borderColor = '', 1500);
-    return;
-  }
+  if (!domain) { showToast('Enter a target URL or domain first.', 'warning'); return; }
 
-  // Clear previous results
-  state.findings = [];
-  state.logEntries = [];
-  state.sevCounts = {CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,INFO:0};
-  state.page = 0;
-  document.getElementById('log-panel').innerHTML = '';
-  document.getElementById('log-count').textContent = '0';
-  document.getElementById('top-findings-list').innerHTML = '<div class="empty-state">Scan in progress...</div>';
-  updateFindingsTable();
-  [0,0,0,0,0,0].forEach((_,i) => {
-    const ids = ['stat-subdomains','stat-urls','stat-api','stat-findings','stat-critical','stat-high'];
-    document.getElementById(ids[i]).textContent = '0';
-  });
-  updateChart();
+  localStorage.setItem('fp_target', domain);
 
   const formats = [];
   if (document.getElementById('fmt-json').checked) formats.push('json');
+  if (document.getElementById('fmt-jsonl').checked) formats.push('jsonl');
+  if (document.getElementById('fmt-csv').checked) formats.push('csv');
+  if (document.getElementById('fmt-pdf').checked) formats.push('pdf');
   if (document.getElementById('fmt-h1').checked)   formats.push('hackerone');
   if (document.getElementById('fmt-bc').checked)   formats.push('bugcrowd');
   if (document.getElementById('fmt-ig').checked)   formats.push('intigriti');
 
-  const config = {
+  // Collect extra targets from multi-target textarea
+  const extraTargets = (document.getElementById('input-targets')?.value || '')
+    .split('\n')
+    .map(t => t.trim())
+    .filter(t => t && t !== domain);
+
+  const cfg = {
     domain,
+    targets: extraTargets,
     run_subdomains:    document.getElementById('mod-subdomains').checked,
     run_crawl:         document.getElementById('mod-crawl').checked,
+    run_dir_fuzz:      document.getElementById('mod-dir_fuzz').checked,
     run_fuzz:          document.getElementById('mod-fuzz').checked,
     run_api:           document.getElementById('mod-api').checked,
     run_smart_wordlist:document.getElementById('mod-wordlist').checked,
     output_formats:    formats.length ? formats : ['json'],
     crawl_depth:  parseInt(document.getElementById('opt-depth').value)   || 3,
+    dir_depth:    parseInt(document.getElementById('opt-dir-depth').value) || 1,
+    dir_wordlist: document.getElementById('opt-dir-wordlist').value.trim(),
+    dir_extensions: (document.getElementById('opt-dir-exts').value || '')
+      .split(',')
+      .map(x => x.trim())
+      .filter(Boolean),
     rate_limit:   parseInt(document.getElementById('opt-rate').value)    || 50,
     threads:      parseInt(document.getElementById('opt-threads').value) || 20,
     timeout:      parseInt(document.getElementById('opt-timeout').value) || 10,
+    delay_ms:     parseInt(document.getElementById('opt-delay').value)   || 0,
+    jitter_ms:    parseInt(document.getElementById('opt-jitter').value)  || 0,
+    max_hits:     parseInt(document.getElementById('opt-max-hits').value) || 0,
     proxy:        document.getElementById('opt-proxy').value.trim(),
+    replay_proxy: document.getElementById('opt-replay-proxy').value.trim(),
+    follow_redirects: document.getElementById('opt-follow').checked,
+    mutate_wordlist: document.getElementById('opt-mutate').checked,
+    mutate_depth: document.getElementById('opt-mutate').checked ? 2 : 1,
+    resume: document.getElementById('opt-resume').checked,
+    calibration_profile: document.getElementById('opt-calibration-profile').value,
+    recursion_status: document.getElementById('opt-rec-status').value.trim(),
+    match_status: document.getElementById('opt-match-status').value.trim(),
   };
 
   try {
     const res = await fetch('/api/scan/start', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(config),
+      body: JSON.stringify(cfg),
     });
     if (!res.ok) {
       const err = await res.json();
-      alert(`Error: ${err.detail || 'Failed to start scan'}`);
-      return;
+      showToast(err.detail || 'Failed to start scan', 'error'); return;
     }
     const data = await res.json();
-    state.scanId  = data.scan_id;
-    state.running = true;
-
-    // Update UI
-    setStatus('running', 'Scanning');
-    setScanBtn(true);
-    const chip = document.getElementById('target-chip');
-    chip.textContent = domain;
-    chip.style.display = '';
-    document.getElementById('btn-clear').style.display = 'none';
-
-    switchTab('log', document.querySelector('[data-tab="log"]'));
+    S.scanId = data.scan_id;
+    onScanStarted(domain);
     connectWS(data.scan_id);
-
-  } catch (err) {
-    alert(`Failed to connect to server: ${err.message}`);
+  } catch(e) {
+    showToast('Cannot connect to server: ' + e.message, 'error');
   }
 }
 
 async function stopScan() {
   try {
     await fetch('/api/scan/stop', { method: 'POST' });
-  } catch {}
-  state.running = false;
-  setScanBtn(false);
-  setStatus('stopped', 'Stopped');
+  } catch(_) {}
+  onScanStopped();
 }
 
-function setScanBtn(running) {
-  const btn   = document.getElementById('btn-scan');
-  const label = document.getElementById('btn-scan-label');
-  const icon  = document.querySelector('.btn-scan-icon');
-  if (running) {
-    btn.classList.add('scanning');
-    label.textContent = 'Stop Scan';
-    icon.textContent  = '&#9632;';
-    icon.innerHTML    = '&#9632;';
-  } else {
-    btn.classList.remove('scanning');
-    label.textContent = 'Start Scan';
-    icon.innerHTML    = '&#9654;';
-  }
-}
+function onScanStarted(domain) {
+  S.running = true;
+  S.subdomains = []; S.urls = []; S.directories = [];
+  S.apiEndpoints = []; S.findings = []; S.logs = [];
+  S.completedStages.clear(); S.activeStage = null;
 
-function clearResults() {
-  state.findings = [];
-  state.logEntries = [];
-  state.sevCounts = {CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,INFO:0};
-  state.page = 0;
-  document.getElementById('log-panel').innerHTML = '';
-  document.getElementById('log-count').textContent = '0';
-  document.getElementById('findings-count').textContent = '0';
-  document.getElementById('top-findings-list').innerHTML = '<div class="empty-state">No findings yet. Start a scan.</div>';
-  document.getElementById('target-chip').style.display = 'none';
+  // Reset all tabs
+  resetAllData();
+
+  // UI
+  const btn = document.getElementById('btn-scan');
+  btn.classList.add('running');
+  document.getElementById('btn-scan-label').textContent = '■  Stop Scan';
+  document.getElementById('scan-pulse').style.display = 'inline-block';
+
+  const tp = document.getElementById('topbar-target');
+  tp.classList.remove('idle');
+  document.getElementById('topbar-target-text').textContent = domain;
+  document.getElementById('topbar-stage').style.display = 'flex';
   document.getElementById('btn-clear').style.display = 'none';
-  setStatus('idle', 'Ready');
-  setStage(null);
-  ['stat-subdomains','stat-urls','stat-api','stat-findings','stat-critical','stat-high']
-    .forEach(id => document.getElementById(id).textContent = '0');
-  updateChart();
-  updateFindingsTable();
+
+  resetPipeline();
 }
 
-// ─── Log panel ───────────────────────────────────────────────────────────────
-function appendLog(entry) {
-  state.logEntries.push(entry);
-  const count = state.logEntries.length;
-  document.getElementById('log-count').textContent = count.toLocaleString();
+function onScanStopped() {
+  S.running = false;
+  const btn = document.getElementById('btn-scan');
+  btn.classList.remove('running');
+  document.getElementById('btn-scan-label').innerHTML = '▶ &nbsp;Start Scan';
+  document.getElementById('scan-pulse').style.display = 'none';
+  document.getElementById('topbar-stage').style.display = 'none';
+  document.getElementById('btn-clear').style.display = 'inline-block';
+  if (S.activeStage) markStage(S.activeStage, 'done');
+  loadReports();
+  showToast('Scan completed!', 'success');
+}
 
-  if (state.logFilter !== 'ALL' && entry.level !== state.logFilter) return;
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function connectWS(scanId) {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${proto}://${location.host}/ws/${scanId}`;
+  S.ws = new WebSocket(url);
+
+  S.ws.onmessage = e => {
+    try { handleMsg(JSON.parse(e.data)); }
+    catch(_) {}
+  };
+  S.ws.onclose = () => { if (S.running) onScanStopped(); };
+  S.ws.onerror = () => { showToast('WebSocket error', 'error'); };
+}
+
+function handleMsg(msg) {
+  switch(msg.type) {
+    case 'log':          handleLog(msg);          break;
+    case 'stats':        handleStats(msg.stats);  break;
+    case 'finding':      handleFinding(msg.finding); break;
+    case 'subdomain':    handleSubdomain(msg.value); break;
+    case 'urls_batch':   (msg.values||[]).forEach(u => handleUrl(u)); break;
+    case 'api_endpoint': handleApiEndpoint(msg.value); break;
+    case 'stage':        handleStage(msg);        break;
+    case 'complete':     handleComplete(msg);     break;
+    case 'error':        handleError(msg.text);   break;
+    case 'stopped':      onScanStopped();         break;
+    case 'ping':         break;
+  }
+}
+
+// ── Message Handlers ──────────────────────────────────────────────────────────
+
+function handleLog(msg) {
+  S.logs.push(msg);
+  if (!document.getElementById('log-empty').parentNode) return;
+  document.getElementById('log-empty').style.display = 'none';
 
   const panel = document.getElementById('log-panel');
-  const row = document.createElement('div');
-  row.className = `log-entry level-${entry.level || 'INFO'}`;
-  row.dataset.level = entry.level || 'INFO';
-  row.innerHTML = `
-    <span class="log-ts">${entry.ts || ''}</span>
-    <span class="log-src">${(entry.src || '').slice(0,10)}</span>
-    <span class="log-lvl ${entry.level || 'INFO'}">${(entry.level || 'INFO').slice(0,4)}</span>
-    <span class="log-text">${escHtml(entry.text || '')}</span>
+  if (S.logFilter !== 'ALL' && msg.level !== S.logFilter) return;
+
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.dataset.level = msg.level;
+  line.innerHTML = `
+    <span class="log-ts">${esc(msg.ts||'')}</span>
+    <span class="log-src">${esc(msg.src||'')}</span>
+    <span class="log-lvl log-lvl-${(msg.level||'info').toLowerCase()}">${esc(msg.level||'INFO')}</span>
+    <span class="log-msg" title="${esc(msg.text||'')}">${esc(msg.text||'')}</span>
   `;
-  panel.appendChild(row);
+  panel.appendChild(line);
 
-  // Auto-scroll to bottom
-  panel.scrollTop = panel.scrollHeight;
+  // Auto-scroll if near bottom
+  if (panel.scrollHeight - panel.scrollTop - panel.clientHeight < 120) {
+    panel.scrollTop = panel.scrollHeight;
+  }
+
+  animateBadge('badge-log', S.logs.length);
 }
 
-function filterLog(level, btn) {
-  state.logFilter = level;
-  document.querySelectorAll('.log-filter-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
+function handleStats(stats) {
+  if (!stats) return;
+  animateNum('stat-subdomains', stats.subdomains         || 0);
+  animateNum('stat-urls',       stats.crawled_urls       || 0);
+  animateNum('stat-params',     stats.parameterized_urls || 0);
+  animateNum('stat-api',        stats.api_endpoints      || 0);
 
-  // Re-render log
-  const panel = document.getElementById('log-panel');
-  panel.innerHTML = '';
-  state.logEntries.forEach(e => {
-    if (level === 'ALL' || e.level === level) {
-      const row = document.createElement('div');
-      row.className = `log-entry level-${e.level || 'INFO'}`;
-      row.innerHTML = `
-        <span class="log-ts">${e.ts||''}</span>
-        <span class="log-src">${(e.src||'').slice(0,10)}</span>
-        <span class="log-lvl ${e.level||'INFO'}">${(e.level||'INFO').slice(0,4)}</span>
-        <span class="log-text">${escHtml(e.text||'')}</span>
-      `;
-      panel.appendChild(row);
+  const totalF = stats.findings || 0;
+  // Security findings = all findings minus directory findings
+  const dirCount = S.directories.length;
+  animateNum('stat-findings', Math.max(0, totalF - dirCount));
+
+  const sev = countBySeverity(S.findings);
+  animateNum('stat-critical', sev.CRITICAL || 0);
+  animateNum('stat-high',     sev.HIGH     || 0);
+  animateNum('stat-dirs',     dirCount);
+}
+
+function handleSubdomain(value) {
+  if (!value || S.subdomains.includes(value)) return;
+  S.subdomains.push(value);
+  animateNum('stat-subdomains', S.subdomains.length);
+  animateBadge('badge-sub', S.subdomains.length);
+
+  if (S.currentTab === 'subdomains') {
+    appendDataItem('list-subdomains', value, 'SUB', 'var(--purple)');
+  }
+  document.getElementById('sub-count').textContent = S.subdomains.length + ' subdomains';
+}
+
+function handleUrl(value) {
+  if (!value || S.urls.includes(value)) return;
+  S.urls.push(value);
+  animateBadge('badge-urls', S.urls.length);
+
+  if (S.currentTab === 'urls') {
+    appendDataItem('list-urls', value, 'URL', 'var(--cyan)');
+  }
+  document.getElementById('urls-count').textContent = S.urls.length + ' URLs';
+}
+
+function handleApiEndpoint(value) {
+  if (!value || S.apiEndpoints.includes(value)) return;
+  S.apiEndpoints.push(value);
+  animateBadge('badge-api', S.apiEndpoints.length);
+
+  if (S.currentTab === 'api') {
+    appendDataItem('list-api', value, 'API', 'var(--green)');
+  }
+  document.getElementById('api-count').textContent = S.apiEndpoints.length + ' endpoints';
+}
+
+function handleFinding(f) {
+  if (!f) return;
+
+  if (f.category === 'Directory Found') {
+    // Route to directories tab
+    const extra = f.extra || {};
+    const dir = {
+      url:        f.url,
+      status:     f.status_code || extra.status || 0,
+      size:       f.response_length || 0,
+      elapsed_ms: extra.elapsed_ms || 0,
+      severity:   f.severity,
+      detail:     f.detail || '',
+      word:       extra.word || '',
+    };
+    S.directories.push(dir);
+    animateNum('stat-dirs', S.directories.length);
+    animateBadge('badge-dirs', S.directories.length);
+    document.getElementById('dirs-count').textContent = S.directories.length + ' paths';
+
+    if (S.currentTab === 'dirs') {
+      appendDirRow(dir);
     }
-  });
-  panel.scrollTop = panel.scrollHeight;
-}
+  } else {
+    // Security finding
+    S.findings.push(f);
+    updateChart();
+    animateBadge('badge-findings', S.findings.length);
+    document.getElementById('findings-count-lbl').textContent = S.findings.length + ' findings';
 
-function clearLog() {
-  state.logEntries = [];
-  document.getElementById('log-panel').innerHTML = '';
-  document.getElementById('log-count').textContent = '0';
-}
+    const sev = countBySeverity(S.findings);
+    animateNum('stat-critical', sev.CRITICAL || 0);
+    animateNum('stat-high',     sev.HIGH     || 0);
+    animateNum('stat-findings', S.findings.length);
 
-// ─── Findings ────────────────────────────────────────────────────────────────
-function addFinding(f) {
-  state.findings.push(f);
-  const sev = (f.severity || 'INFO').toUpperCase();
-  state.sevCounts[sev] = (state.sevCounts[sev] || 0) + 1;
-  updateSevCounters();
-  updateChart();
-
-  // Add to top findings if CRITICAL or HIGH
-  if (sev === 'CRITICAL' || sev === 'HIGH') addTopFinding(f);
-
-  // Refresh table if on page 0 and filter matches
-  if (state.page === 0 && (state.sevFilter === 'ALL' || state.sevFilter === sev)) {
-    // Throttle table re-renders (every 20 findings)
-    if (state.findings.length % 20 === 0 || state.findings.length < 20) {
-      updateFindingsTable();
+    if (S.currentTab === 'findings') {
+      renderFindings();
+    }
+    if (f.severity === 'CRITICAL' || f.severity === 'HIGH') {
+      appendTopFinding(f);
     }
   }
 }
 
-function addTopFinding(f) {
+function handleStage(msg) {
+  const name = msg.stage;
+  if (S.activeStage && S.activeStage !== name) {
+    markStage(S.activeStage, 'done');
+    S.completedStages.add(S.activeStage);
+  }
+  if (msg.text === 'Skipped') {
+    markStage(name, 'skipped');
+    S.completedStages.add(name);
+  } else {
+    markStage(name, 'active');
+    S.activeStage = name;
+    document.getElementById('stage-pill').textContent = name.replace('_',' ').toUpperCase();
+  }
+}
+
+function handleComplete(msg) {
+  onScanStopped();
+  // Mark all remaining stages done
+  if (S.activeStage) markStage(S.activeStage, 'done');
+  markStage('reports', 'done');
+  if (msg.reports && msg.reports.length) {
+    showToast(`✓ ${msg.reports.length} report(s) generated. Go to Reports tab.`, 'success');
+    loadReports();
+    // Switch to reports tab briefly
+    const reportsBtn = document.querySelector('[data-tab="reports"]');
+    if (reportsBtn) switchTab('reports', reportsBtn);
+  }
+}
+
+function handleError(text) {
+  showToast('Error: ' + text, 'error');
+  onScanStopped();
+}
+
+// ── Pipeline ──────────────────────────────────────────────────────────────────
+function resetPipeline() {
+  PIPE_STAGES.forEach(s => markStage(s, ''));
+}
+function markStage(name, cls) {
+  const el = document.getElementById('pipe-' + name);
+  if (!el) return;
+  el.className = 'pipe-node';
+  if (cls) el.classList.add(cls);
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────────────
+
+function appendDataItem(listId, url, badge, color) {
+  const list = document.getElementById(listId);
+  // Remove empty state
+  const empty = list.querySelector('.empty-state');
+  if (empty) empty.remove();
+
+  const div = document.createElement('div');
+  div.className = 'data-item';
+  div.innerHTML = `
+    <span class="data-item-badge" style="background:${color}22;color:${color};border:1px solid ${color}44">${badge}</span>
+    <span class="data-item-url" title="${esc(url)}">${esc(url)}</span>
+    <a href="${esc(url)}" target="_blank" style="color:var(--text-muted);font-size:10px;flex-shrink:0" title="Open">↗</a>
+  `;
+  list.appendChild(div);
+}
+
+function renderSimpleList(type) {
+  const map = {
+    subdomains: {
+      listId: 'list-subdomains',
+      values: S.subdomains,
+      badge: 'SUB',
+      color: 'var(--purple)',
+      empty: 'No subdomains found yet.',
+      countId: 'sub-count',
+      suffix: ' subdomains',
+    },
+    urls: {
+      listId: 'list-urls',
+      values: S.urls,
+      badge: 'URL',
+      color: 'var(--cyan)',
+      empty: 'No URLs crawled yet.',
+      countId: 'urls-count',
+      suffix: ' URLs',
+    },
+    api: {
+      listId: 'list-api',
+      values: S.apiEndpoints,
+      badge: 'API',
+      color: 'var(--green)',
+      empty: 'No API endpoints found yet.',
+      countId: 'api-count',
+      suffix: ' endpoints',
+    },
+  };
+  const cfg = map[type];
+  if (!cfg) return;
+  const list = document.getElementById(cfg.listId);
+  list.innerHTML = '';
+  if (!cfg.values.length) {
+    list.innerHTML = `<div class="empty-state"><div class="empty-icon">⌁</div><div>${cfg.empty}</div></div>`;
+  } else {
+    cfg.values.forEach(value => appendDataItem(cfg.listId, value, cfg.badge, cfg.color));
+  }
+  document.getElementById(cfg.countId).textContent = cfg.values.length + cfg.suffix;
+}
+
+function appendDirRow(dir) {
+  const tbody = document.getElementById('dirs-tbody');
+  const empty = tbody.querySelector('.empty-state');
+  if (empty) empty.closest('tr').remove();
+
+  const statusCls = 's' + dir.status;
+  const tr = document.createElement('tr');
+  tr.dataset.status = dir.status;
+  tr.innerHTML = `
+    <td><span class="status-chip ${statusCls}">${dir.status}</span></td>
+    <td style="color:var(--text-dim)">${fmtSize(dir.size)}</td>
+    <td style="color:var(--text-muted);font-family:var(--font-mono)">${dir.elapsed_ms}ms</td>
+    <td class="td-url" title="${esc(dir.url)}">
+      <a href="${esc(dir.url)}" target="_blank" style="color:var(--text-dim)">${esc(dir.url)}</a>
+    </td>
+    <td style="color:var(--text-muted);font-size:10px">${esc(dir.detail)}</td>
+  `;
+  tbody.appendChild(tr);
+  applyDirFilter(tr);
+}
+
+function applyDirFilter(tr) {
+  const s = parseInt(tr.dataset.status);
+  const show = S.dirsFilter === 'ALL'
+    || (S.dirsFilter === '200' && s >= 200 && s < 300)
+    || (S.dirsFilter === '403' && s === 403)
+    || (S.dirsFilter === '401' && s === 401)
+    || (S.dirsFilter === '301' && s >= 300 && s < 400)
+    || (S.dirsFilter === '500' && s >= 500);
+  tr.style.display = show ? '' : 'none';
+}
+
+function renderDirs() {
+  const tbody = document.getElementById('dirs-tbody');
+  tbody.innerHTML = '';
+  if (!S.directories.length) {
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">📂</div><div>No directories found yet.</div></div></td></tr>`;
+    return;
+  }
+  S.directories.forEach(d => appendDirRow(d));
+}
+
+function appendTopFinding(f) {
   const list = document.getElementById('top-findings-list');
   const empty = list.querySelector('.empty-state');
   if (empty) empty.remove();
 
-  if (list.children.length >= 50) return; // cap at 50 in overview
+  if (list.children.length >= 8) return; // cap at 8
 
-  const row = document.createElement('div');
-  row.className = 'top-finding-row';
-  row.innerHTML = `
-    <span class="sev-badge badge-${(f.severity||'INFO').toUpperCase()}">${f.severity||'INFO'}</span>
+  const div = document.createElement('div');
+  div.className = 'finding-preview';
+  div.innerHTML = `
+    <span class="sev-badge sev-${f.severity.toLowerCase()}">${f.severity}</span>
     <div style="min-width:0">
-      <div class="url-cell" title="${escHtml(f.url||'')}">${escHtml((f.url||'').slice(0,80))}</div>
-      <div style="font-size:10px;color:var(--text-3);margin-top:2px">${escHtml(f.category||'')} ${f.parameter ? '· param: '+f.parameter : ''}</div>
+      <div class="finding-preview-cat">${esc(f.category)}</div>
+      <div class="finding-preview-url" title="${esc(f.url)}">${esc(f.url)}</div>
     </div>
   `;
-  list.appendChild(row);
+  list.appendChild(div);
 }
 
-function filteredFindings() {
-  if (state.sevFilter === 'ALL') return state.findings;
-  return state.findings.filter(f => (f.severity||'').toUpperCase() === state.sevFilter);
-}
-
-function filterFindings(sev, btn) {
-  state.sevFilter = sev;
-  state.page = 0;
-  document.querySelectorAll('.sev-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  updateFindingsTable();
-}
-
-function updateFindingsTable() {
+function renderFindings() {
   const tbody = document.getElementById('findings-tbody');
-  const filtered = filteredFindings();
-  const total = filtered.length;
-  const start = state.page * state.pageSize;
-  const slice = filtered.slice(start, start + state.pageSize);
+  const all = S.findings.filter(f =>
+    S.findingsSev === 'ALL' || f.severity === S.findingsSev
+  );
+  const total = all.length;
+  const pages = Math.ceil(total / S.FIND_PER_PG);
+  S.findingsPage = Math.min(S.findingsPage, pages || 1);
+  const slice = all.slice((S.findingsPage-1)*S.FIND_PER_PG, S.findingsPage*S.FIND_PER_PG);
 
-  if (total === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty-cell">No findings match the current filter.</td></tr>';
+  tbody.innerHTML = '';
+  if (!slice.length) {
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🚨</div><div>No findings match the current filter.</div></div></td></tr>`;
     document.getElementById('pag-bar').style.display = 'none';
-    document.getElementById('pag-info').textContent = '';
     return;
   }
 
-  tbody.innerHTML = slice.map(f => {
-    const sev = (f.severity || 'INFO').toUpperCase();
-    return `<tr>
-      <td><span class="sev-badge badge-${sev}">${sev}</span></td>
-      <td class="cat-cell">${escHtml(f.category||'')}</td>
-      <td class="url-cell" title="${escHtml(f.url||'')}">${escHtml((f.url||'').slice(0,90))}</td>
-      <td class="param-cell">${escHtml(f.parameter||'')}</td>
-      <td class="detail-cell" title="${escHtml(f.detail||'')}">${escHtml((f.detail||'').slice(0,80))}</td>
-    </tr>`;
-  }).join('');
+  slice.forEach(f => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><span class="sev-badge sev-${f.severity.toLowerCase()}">${f.severity}</span></td>
+      <td class="td-cat">${esc(f.category)}</td>
+      <td class="td-url" title="${esc(f.url)}">${esc(f.url)}</td>
+      <td class="td-param">${esc(f.parameter||'–')}</td>
+      <td class="td-detail" title="${esc(f.detail||'')}">${esc(f.detail||'–')}</td>
+    `;
+    tbody.appendChild(tr);
+  });
 
-  const totalPages = Math.ceil(total / state.pageSize);
-  document.getElementById('pag-info').textContent = `${total.toLocaleString()} findings`;
-  document.getElementById('pag-page').textContent = `Page ${state.page+1} / ${totalPages}`;
-  document.getElementById('pag-bar').style.display = totalPages > 1 ? 'flex' : 'none';
-  document.getElementById('pag-prev').disabled = state.page === 0;
-  document.getElementById('pag-next').disabled = state.page >= totalPages - 1;
+  const pag = document.getElementById('pag-bar');
+  if (pages > 1) {
+    pag.style.display = 'flex';
+    document.getElementById('pag-info').textContent = `Page ${S.findingsPage} / ${pages}  (${total} total)`;
+    document.getElementById('pag-prev').disabled = S.findingsPage <= 1;
+    document.getElementById('pag-next').disabled = S.findingsPage >= pages;
+  } else {
+    pag.style.display = 'none';
+  }
 }
 
-function prevPage() { if (state.page > 0) { state.page--; updateFindingsTable(); } }
-function nextPage() {
-  const total = filteredFindings().length;
-  if ((state.page+1) * state.pageSize < total) { state.page++; updateFindingsTable(); }
+// ── Filters ───────────────────────────────────────────────────────────────────
+
+function filterLog(level, btn) {
+  S.logFilter = level;
+  document.querySelectorAll('.log-filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  const panel = document.getElementById('log-panel');
+  panel.querySelectorAll('.log-line').forEach(line => {
+    line.style.display = (level === 'ALL' || line.dataset.level === level) ? '' : 'none';
+  });
 }
 
-// ─── Reports ─────────────────────────────────────────────────────────────────
+function filterFindings(sev, btn) {
+  S.findingsSev = sev;
+  S.findingsPage = 1;
+  document.querySelectorAll('.sev-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderFindings();
+}
+
+function filterDirs(status, btn) {
+  S.dirsFilter = status;
+  document.querySelectorAll('.dir-filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('#dirs-tbody tr').forEach(tr => applyDirFilter(tr));
+}
+
+function filterData(type, q) {
+  const listId = { subdomains: 'list-subdomains', urls: 'list-urls', api: 'list-api' }[type];
+  if (!listId) return;
+  const lower = q.toLowerCase();
+  document.querySelectorAll('#' + listId + ' .data-item').forEach(item => {
+    const url = item.querySelector('.data-item-url');
+    item.style.display = (!q || (url && url.textContent.toLowerCase().includes(lower))) ? '' : 'none';
+  });
+}
+
+function changePage(dir) {
+  S.findingsPage += dir;
+  renderFindings();
+}
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+
 async function loadReports() {
   try {
     const res = await fetch('/api/reports');
     const data = await res.json();
     renderReports(data.reports || []);
-  } catch (e) {
-    console.error('Failed to load reports', e);
-  }
+  } catch(_) {}
 }
 
 function renderReports(reports) {
-  const list = document.getElementById('reports-list');
+  const grid = document.getElementById('reports-grid');
+  const zipBtn = document.getElementById('btn-zip');
+
   if (!reports.length) {
-    list.innerHTML = '<div class="empty-state">No reports yet. Complete a scan first.</div>';
+    grid.innerHTML = `<div class="empty-state"><div class="empty-icon">📊</div><div>No reports yet. Complete a scan to generate reports.</div></div>`;
+    zipBtn.style.display = 'none';
     return;
   }
-  list.innerHTML = reports.map(r => `
-    <div class="report-item">
-      <div class="report-info">
-        <span class="report-ext ${r.ext}">${r.ext}</span>
-        <div>
-          <div class="report-name">${escHtml(r.name)}</div>
-          <div class="report-size">${formatBytes(r.size)}</div>
-        </div>
+
+  zipBtn.style.display = 'flex';
+  grid.innerHTML = '';
+
+  reports.forEach(r => {
+    const icon = r.ext === 'pdf' ? 'PDF' : r.ext === 'json' ? 'JSON' : r.ext === 'jsonl' ? 'JL' : r.ext === 'csv' ? 'CSV' : 'MD';
+    const extClass = r.ext === 'pdf' ? 'ext-pdf' : r.ext === 'json' || r.ext === 'jsonl' ? 'ext-json' : 'ext-md';
+    const sizeStr = fmtSize(r.size);
+    const div = document.createElement('div');
+    div.className = 'report-item';
+    div.innerHTML = `
+      <div class="report-icon">${icon}</div>
+      <div class="report-meta">
+        <div class="report-name" title="${esc(r.name)}">${esc(r.name)}</div>
+        <div class="report-info">${sizeStr} &nbsp;·&nbsp; ${r.ext.toUpperCase()}</div>
       </div>
-      <a href="/api/reports/download/${encodeURIComponent(r.name)}" download="${escHtml(r.name)}"
-         class="btn-download">Download</a>
-    </div>
-  `).join('');
+      <span class="report-ext-badge ${extClass}">${r.ext.toUpperCase()}</span>
+      <a class="btn-dl" href="/api/reports/download/${encodeURIComponent(r.name)}" download>
+        ⬇ Download
+      </a>
+    `;
+    grid.appendChild(div);
+  });
 }
 
-// ─── Tabs ────────────────────────────────────────────────────────────────────
-function switchTab(name, btn) {
-  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById(`tab-${name}`).classList.add('active');
-  if (btn) btn.classList.add('active');
-  if (name === 'findings') updateFindingsTable();
-  if (name === 'reports')  loadReports();
+function downloadZip() {
+  window.location.href = '/api/reports/zip';
 }
 
-// ─── Advanced panel ──────────────────────────────────────────────────────────
-function toggleAdvanced() {
-  const panel = document.getElementById('advanced-panel');
-  const arrow = document.getElementById('adv-arrow');
-  const open  = panel.classList.toggle('open');
-  arrow.innerHTML = open ? '&#9650;' : '&#9660;';
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+function clearLog() {
+  document.getElementById('log-panel').innerHTML = `
+    <div class="empty-state" id="log-empty">
+      <div class="empty-icon">📋</div><div>Logs will appear here during a scan.</div>
+    </div>`;
+  S.logs = [];
+  animateBadge('badge-log', 0);
 }
 
-// ─── Utilities ───────────────────────────────────────────────────────────────
-function escHtml(str) {
+function clearAll() {
+  S.subdomains=[]; S.urls=[]; S.directories=[];
+  S.apiEndpoints=[]; S.findings=[]; S.logs=[];
+  resetAllData();
+  updateChart();
+  document.getElementById('btn-clear').style.display = 'none';
+  document.getElementById('topbar-target').classList.add('idle');
+  document.getElementById('topbar-target-text').textContent = 'No target';
+  resetPipeline();
+  ['stat-subdomains','stat-urls','stat-dirs','stat-api','stat-params',
+   'stat-findings','stat-critical','stat-high'].forEach(id => animateNum(id,0));
+  ['badge-log','badge-sub','badge-urls','badge-dirs','badge-api','badge-findings']
+    .forEach(id => animateBadge(id, 0));
+}
+
+function resetAllData() {
+  // Subdomains list
+  document.getElementById('list-subdomains').innerHTML = `<div class="empty-state"><div class="empty-icon">🌐</div><div>Enable Subdomain Discovery and run a scan.</div></div>`;
+  document.getElementById('sub-count').textContent = '0 subdomains';
+  // URLs list
+  document.getElementById('list-urls').innerHTML = `<div class="empty-state"><div class="empty-icon">🕷️</div><div>Enable URL Crawler and run a scan.</div></div>`;
+  document.getElementById('urls-count').textContent = '0 URLs';
+  // API list
+  document.getElementById('list-api').innerHTML = `<div class="empty-state"><div class="empty-icon">🔌</div><div>Enable API Discovery and run a scan.</div></div>`;
+  document.getElementById('api-count').textContent = '0 endpoints';
+  // Dirs table
+  document.getElementById('dirs-tbody').innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">📂</div><div>Enable Directory Fuzzer and run a scan.</div></div></td></tr>`;
+  document.getElementById('dirs-count').textContent = '0 paths';
+  // Findings table
+  document.getElementById('findings-tbody').innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🚨</div><div>No security findings yet. Run a scan.</div></div></td></tr>`;
+  document.getElementById('findings-count-lbl').textContent = '0 findings';
+  document.getElementById('pag-bar').style.display = 'none';
+  // Top findings
+  document.getElementById('top-findings-list').innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><div>No findings yet. Configure a target and start a scan.</div></div>`;
+  // Log
+  clearLog();
+  // Chart
+  updateChart();
+}
+
+async function copyData(type) {
+  const data = {
+    subdomains:  S.subdomains,
+    urls:        S.urls,
+    dirs:        S.directories.map(d => d.url),
+    api:         S.apiEndpoints,
+  }[type] || [];
+  try {
+    await navigator.clipboard.writeText(data.join('\n'));
+    showToast(`${data.length} items copied to clipboard`, 'success');
+  } catch(_) {
+    showToast('Copy failed — try manually selecting', 'warning');
+  }
+}
+
+function countBySeverity(findings) {
+  return findings.reduce((acc, f) => {
+    acc[f.severity] = (acc[f.severity] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+function fmtSize(bytes) {
+  if (!bytes || bytes === 0) return '0B';
+  if (bytes < 1024) return bytes + 'B';
+  if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + 'KB';
+  return (bytes/(1024*1024)).toFixed(2) + 'MB';
+}
+
+function esc(str) {
+  if (!str) return '';
   return String(str)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
-function formatBytes(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024*1024) return `${(bytes/1024).toFixed(1)} KB`;
-  return `${(bytes/1024/1024).toFixed(1)} MB`;
+function animateNum(id, val) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const cur = parseInt(el.textContent) || 0;
+  if (cur === val) return;
+  el.textContent = val;
+  el.classList.remove('updated');
+  void el.offsetWidth; // reflow
+  el.classList.add('updated');
 }
 
-// ─── Init ────────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  initChart();
-  loadReports();
+function animateBadge(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
 
-  // Enter key on domain input
-  document.getElementById('input-domain').addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !state.running) startScan();
-  });
-
-  // Restore focus styling on domain input
-  document.getElementById('input-domain').addEventListener('input', e => {
-    e.target.style.borderColor = '';
-  });
-});
+// ── Toast Notifications ───────────────────────────────────────────────────────
+function showToast(msg, type = 'info') {
+  const container = document.getElementById('toast-container');
+  const icons = { success: '✓', error: '✗', warning: '⚠', info: 'ℹ' };
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `<span>${icons[type]||'•'}</span><span>${esc(msg)}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.4s'; }, 4000);
+  setTimeout(() => toast.remove(), 4500);
+}

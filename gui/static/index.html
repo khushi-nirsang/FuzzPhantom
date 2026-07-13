@@ -3,303 +3,609 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FuzzPhantom &mdash; Offensive Security Toolkit</title>
-  <meta name="description" content="FuzzPhantom GUI dashboard for URL fuzzing and web reconnaissance" />
+  <title>FuzzPhantom &mdash; Offensive Recon Toolkit</title>
+  <meta name="description" content="FuzzPhantom — Professional URL fuzzing, subdomain discovery, directory brute-force and API recon GUI toolkit for bug bounty hunters." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="/static/css/style.css" />
 </head>
 <body>
-  <div class="grid-bg"></div>
+<div class="grid-bg"></div>
 
-  <div class="app">
+<div class="app">
 
-    <!-- ═══════════════════════════════ HEADER ══════════════════════════════ -->
-    <header class="header">
-      <div class="header-brand">
-        <div class="logo-mark">
-          <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="28" height="28">
-            <circle cx="16" cy="16" r="15" stroke="#00d4ff" stroke-width="1.5" opacity="0.4"/>
-            <path d="M10 22 L16 8 L22 22" stroke="#00d4ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M12 18 L20 18" stroke="#00d4ff" stroke-width="2" stroke-linecap="round"/>
-            <circle cx="16" cy="8" r="2" fill="#00d4ff"/>
-          </svg>
+  <!-- ══════════════════════════════════════════════════════════════
+       SIDEBAR
+       ══════════════════════════════════════════════════════════════ -->
+  <aside class="sidebar">
+
+    <!-- Logo -->
+    <div class="sidebar-logo">
+      <div class="logo-icon">👻</div>
+      <div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="logo-title">FuzzPhantom</span>
+          <span class="logo-version">v2.0</span>
         </div>
-        <div class="logo-text">
-          <span class="logo-name">FuzzPhantom</span>
-          <span class="logo-version">v1.0</span>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:1px">Offensive Recon Toolkit</div>
+      </div>
+    </div>
+
+    <!-- Target -->
+    <div class="sidebar-section">
+      <div class="section-label">Target</div>
+      <div class="target-input-wrap">
+        <input type="text" id="input-domain" class="target-input"
+               placeholder="https://example.com/path"
+               autocomplete="off" spellcheck="false" />
+        <span class="target-input-icon">🎯</span>
+      </div>
+      <!-- Multi-target expander -->
+      <div style="margin-top:6px">
+        <button id="btn-multi-toggle" onclick="toggleMultiTarget()"
+          style="background:none;border:1px dashed var(--border);border-radius:6px;
+                 color:var(--text-muted);font-size:10px;cursor:pointer;
+                 padding:4px 10px;width:100%;text-align:left;transition:all .2s">
+          ＋ Add multiple targets
+        </button>
+        <div id="multi-target-panel" style="display:none;margin-top:6px">
+          <textarea id="input-targets"
+            placeholder="One URL per line:&#10;https://example.com/api&#10;https://beta.example.com"
+            spellcheck="false"
+            style="width:100%;height:80px;resize:vertical;background:var(--bg-input);
+                   border:1px solid var(--border);border-radius:8px;color:var(--text-primary);
+                   font-family:var(--font-mono);font-size:10px;padding:8px;
+                   box-sizing:border-box;outline:none"></textarea>
+          <div style="font-size:9px;color:var(--text-muted);margin-top:3px">
+            All targets scanned sequentially in the same session
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modules -->
+    <div class="sidebar-section">
+      <div class="section-label">
+        Scan Modules
+        <span style="float:right;cursor:pointer;font-size:10px;color:var(--accent)" onclick="selectAllModules()">All</span>
+        <span style="float:right;cursor:pointer;font-size:10px;color:var(--text-muted);margin-right:8px" onclick="clearAllModules()">None</span>
+      </div>
+      <div class="module-list">
+
+        <!-- Subdomains -->
+        <div class="module-card mod-active" data-mod="subdomains" id="card-subdomains">
+          <div class="module-header" onclick="toggleModuleExpand('subdomains')">
+            <div class="module-dot"></div>
+            <div class="module-meta">
+              <div class="module-name">Subdomain Discovery</div>
+              <div class="module-desc">CT logs + DNS brute-force + Zone Transfer</div>
+            </div>
+            <label class="toggle" onclick="event.stopPropagation()">
+              <input type="checkbox" id="mod-subdomains" checked onchange="onModuleToggle('subdomains',this)">
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- URL Crawler -->
+        <div class="module-card mod-active" data-mod="crawl" id="card-crawl">
+          <div class="module-header" onclick="toggleModuleExpand('crawl')">
+            <div class="module-dot"></div>
+            <div class="module-meta">
+              <div class="module-name">URL Crawler</div>
+              <div class="module-desc">BFS link extraction + JS route mining</div>
+            </div>
+            <label class="toggle" onclick="event.stopPropagation()">
+              <input type="checkbox" id="mod-crawl" checked onchange="onModuleToggle('crawl',this)">
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Directory Fuzzer -->
+        <div class="module-card mod-active" data-mod="dir_fuzz" id="card-dir_fuzz">
+          <div class="module-header" onclick="toggleModuleExpand('dir_fuzz')">
+            <div class="module-dot"></div>
+            <div class="module-meta">
+              <div class="module-name">Directory Fuzzer</div>
+              <div class="module-desc">ffuf-style path brute-force discovery</div>
+            </div>
+            <label class="toggle" onclick="event.stopPropagation()">
+              <input type="checkbox" id="mod-dir_fuzz" checked onchange="onModuleToggle('dir_fuzz',this)">
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Parameter Fuzzer -->
+        <div class="module-card mod-active" data-mod="fuzz" id="card-fuzz">
+          <div class="module-header" onclick="toggleModuleExpand('fuzz')">
+            <div class="module-dot"></div>
+            <div class="module-meta">
+              <div class="module-name">Parameter Fuzzer</div>
+              <div class="module-desc">Payload injection + reflection detection</div>
+            </div>
+            <label class="toggle" onclick="event.stopPropagation()">
+              <input type="checkbox" id="mod-fuzz" checked onchange="onModuleToggle('fuzz',this)">
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- API Discovery -->
+        <div class="module-card mod-active" data-mod="api" id="card-api">
+          <div class="module-header" onclick="toggleModuleExpand('api')">
+            <div class="module-dot"></div>
+            <div class="module-meta">
+              <div class="module-name">API Discovery</div>
+              <div class="module-desc">JS analysis + hidden endpoint probing</div>
+            </div>
+            <label class="toggle" onclick="event.stopPropagation()">
+              <input type="checkbox" id="mod-api" checked onchange="onModuleToggle('api',this)">
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Smart Wordlist -->
+        <div class="module-card" data-mod="wordlist" id="card-wordlist">
+          <div class="module-header" onclick="toggleModuleExpand('wordlist')">
+            <div class="module-dot"></div>
+            <div class="module-meta">
+              <div class="module-name">Smart Wordlist</div>
+              <div class="module-desc">NLP / TF-IDF wordlist generation</div>
+            </div>
+            <label class="toggle" onclick="event.stopPropagation()">
+              <input type="checkbox" id="mod-wordlist" onchange="onModuleToggle('wordlist',this)">
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Advanced Settings -->
+    <div class="sidebar-section">
+      <div class="adv-toggle" id="adv-toggle" onclick="toggleAdvanced()">
+        <span>Advanced Settings</span>
+        <span class="adv-arrow" id="adv-arrow">▼</span>
+      </div>
+      <div class="adv-body hidden" id="adv-body">
+        <div class="field-row">
+          <span class="field-label">Rate (req/s)</span>
+          <input type="number" id="opt-rate" class="field-input" value="200" min="1" max="1000" />
+        </div>
+        <div class="field-row">
+          <span class="field-label">Threads</span>
+          <input type="number" id="opt-threads" class="field-input" value="80" min="1" max="500" />
+        </div>
+        <div class="field-row">
+          <span class="field-label">Crawl Depth</span>
+          <input type="number" id="opt-depth" class="field-input" value="3" min="1" max="10" />
+        </div>
+        <div class="field-row">
+          <span class="field-label">Dir Depth</span>
+          <input type="number" id="opt-dir-depth" class="field-input" value="1" min="1" max="10" />
+        </div>
+        <div class="field-row">
+          <span class="field-label">Timeout (s)</span>
+          <input type="number" id="opt-timeout" class="field-input" value="10" min="1" max="120" />
+        </div>
+        <div class="field-row">
+          <span class="field-label">Delay (ms)</span>
+          <input type="number" id="opt-delay" class="field-input" value="0" min="0" max="10000" />
+        </div>
+        <div class="field-row">
+          <span class="field-label">Jitter (ms)</span>
+          <input type="number" id="opt-jitter" class="field-input" value="0" min="0" max="10000" />
+        </div>
+        <div class="field-row">
+          <span class="field-label">Proxy</span>
+          <input type="text" id="opt-proxy" class="field-input wide" placeholder="http://127.0.0.1:8080" style="width:160px;text-align:left" />
+        </div>
+        <div class="field-row">
+          <span class="field-label">Replay Proxy</span>
+          <input type="text" id="opt-replay-proxy" class="field-input wide" placeholder="http://127.0.0.1:8080" style="width:160px;text-align:left" />
+        </div>
+        <div class="field-row">
+          <span class="field-label">Dir Wordlist</span>
+          <input type="text" id="opt-dir-wordlist" class="field-input wide" placeholder="wordlists/demo_testfire.txt" style="width:160px;text-align:left" />
+        </div>
+        <div class="field-row">
+          <span class="field-label">Extensions</span>
+          <input type="text" id="opt-dir-exts" class="field-input wide" placeholder="php,txt,bak" style="width:160px;text-align:left" />
+        </div>
+        <div class="field-row">
+          <span class="field-label">Status Match</span>
+          <input type="text" id="opt-match-status" class="field-input wide" placeholder="200,302,403" style="width:160px;text-align:left" />
+        </div>
+        <div class="field-row">
+          <span class="field-label">Recurse Status</span>
+          <input type="text" id="opt-rec-status" class="field-input wide" placeholder="200,301-308" style="width:160px;text-align:left" />
+        </div>
+        <div class="field-row">
+          <span class="field-label">Calibration</span>
+          <select id="opt-calibration-profile" class="field-input" style="width:92px">
+            <option value="balanced">balanced</option>
+            <option value="strict">strict</option>
+            <option value="relaxed">relaxed</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Max Hits</span>
+          <input type="number" id="opt-max-hits" class="field-input" value="0" min="0" max="100000" />
+        </div>
+        <label class="fmt-item" id="opt-follow-lbl" onclick="toggleOptionCheckbox('opt-follow')">
+          <input type="checkbox" id="opt-follow">
+          <span class="fmt-dot"></span> Follow redirects
+        </label>
+        <label class="fmt-item" id="opt-mutate-lbl" onclick="toggleOptionCheckbox('opt-mutate')">
+          <input type="checkbox" id="opt-mutate">
+          <span class="fmt-dot"></span> Mutate wordlist
+        </label>
+        <label class="fmt-item" id="opt-resume-lbl" onclick="toggleOptionCheckbox('opt-resume')">
+          <input type="checkbox" id="opt-resume">
+          <span class="fmt-dot"></span> Resume scan
+        </label>
+      </div>
+    </div>
+
+    <!-- Report Formats -->
+    <div class="sidebar-section">
+      <div class="section-label">Report Formats</div>
+      <div class="fmt-grid">
+        <label class="fmt-item checked" id="fmt-json-lbl" onclick="toggleFmt('json')">
+          <input type="checkbox" id="fmt-json" checked>
+          <span class="fmt-dot"></span> JSON
+        </label>
+        <label class="fmt-item" id="fmt-jsonl-lbl" onclick="toggleFmt('jsonl')">
+          <input type="checkbox" id="fmt-jsonl">
+          <span class="fmt-dot"></span> JSONL
+        </label>
+        <label class="fmt-item" id="fmt-csv-lbl" onclick="toggleFmt('csv')">
+          <input type="checkbox" id="fmt-csv">
+          <span class="fmt-dot"></span> CSV
+        </label>
+        <label class="fmt-item checked" id="fmt-pdf-lbl" onclick="toggleFmt('pdf')">
+          <input type="checkbox" id="fmt-pdf" checked>
+          <span class="fmt-dot"></span> PDF
+        </label>
+        <label class="fmt-item checked" id="fmt-h1-lbl" onclick="toggleFmt('h1')">
+          <input type="checkbox" id="fmt-h1" checked>
+          <span class="fmt-dot"></span> HackerOne
+        </label>
+        <label class="fmt-item" id="fmt-bc-lbl" onclick="toggleFmt('bc')">
+          <input type="checkbox" id="fmt-bc">
+          <span class="fmt-dot"></span> Bugcrowd
+        </label>
+        <label class="fmt-item" id="fmt-ig-lbl" onclick="toggleFmt('ig')">
+          <input type="checkbox" id="fmt-ig">
+          <span class="fmt-dot"></span> Intigriti
+        </label>
+      </div>
+    </div>
+
+    <!-- Scan Button -->
+    <div class="sidebar-footer">
+      <button class="btn-scan" id="btn-scan" onclick="handleScan()">
+        <span class="scan-pulse" id="scan-pulse" style="display:none"></span>
+        <span id="btn-scan-label">▶ &nbsp;Start Scan</span>
+      </button>
+    </div>
+
+  </aside>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       MAIN
+       ══════════════════════════════════════════════════════════════ -->
+  <main class="main">
+
+    <!-- Top Bar -->
+    <div class="topbar">
+      <div class="topbar-target idle" id="topbar-target">
+        <span class="topbar-target-dot"></span>
+        <span id="topbar-target-text">No target</span>
+      </div>
+      <div class="topbar-stage" id="topbar-stage" style="display:none">
+        Stage: <span class="stage-pill" id="stage-pill">–</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <div class="topbar-actions">
+        <button class="btn btn-ghost" id="btn-clear" onclick="clearAll()" style="display:none">Clear</button>
+      </div>
+    </div>
+
+    <!-- Stats Bar -->
+    <div class="stats-bar">
+      <div class="stat-card">
+        <div class="stat-value" id="stat-subdomains">0</div>
+        <div class="stat-label">Subdomains</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-urls">0</div>
+        <div class="stat-label">URLs Crawled</div>
+      </div>
+      <div class="stat-card stat-card--dirs">
+        <div class="stat-value" id="stat-dirs">0</div>
+        <div class="stat-label">Directories</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-api">0</div>
+        <div class="stat-label">API Endpoints</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-params">0</div>
+        <div class="stat-label">Params Found</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-findings">0</div>
+        <div class="stat-label">Findings</div>
+      </div>
+      <div class="stat-card stat-card--critical">
+        <div class="stat-value" id="stat-critical">0</div>
+        <div class="stat-label">Critical</div>
+      </div>
+      <div class="stat-card stat-card--high">
+        <div class="stat-value" id="stat-high">0</div>
+        <div class="stat-label">High</div>
+      </div>
+    </div>
+
+    <!-- Pipeline Bar -->
+    <div class="pipeline" id="pipeline">
+      <div class="pipe-step">
+        <div class="pipe-node" id="pipe-subdomains"><span class="pipe-node-dot"></span>Subdomains</div>
+        <span class="pipe-arrow">›</span>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-node" id="pipe-crawl"><span class="pipe-node-dot"></span>Crawler</div>
+        <span class="pipe-arrow">›</span>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-node" id="pipe-dir_fuzz"><span class="pipe-node-dot"></span>Dir Fuzzer</div>
+        <span class="pipe-arrow">›</span>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-node" id="pipe-fuzz"><span class="pipe-node-dot"></span>Param Fuzzer</div>
+        <span class="pipe-arrow">›</span>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-node" id="pipe-api"><span class="pipe-node-dot"></span>API Discovery</div>
+        <span class="pipe-arrow">›</span>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-node" id="pipe-wordlist"><span class="pipe-node-dot"></span>Wordlist</div>
+        <span class="pipe-arrow">›</span>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-node" id="pipe-reports"><span class="pipe-node-dot"></span>Reports</div>
+      </div>
+    </div>
+
+    <!-- Tab Bar -->
+    <div class="tabs-bar">
+      <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview',this)">Overview</button>
+      <button class="tab-btn" data-tab="log" onclick="switchTab('log',this)">
+        Live Log <span class="tab-badge" id="badge-log">0</span>
+      </button>
+      <button class="tab-btn" data-tab="subdomains" onclick="switchTab('subdomains',this)">
+        Subdomains <span class="tab-badge" id="badge-sub">0</span>
+      </button>
+      <button class="tab-btn" data-tab="urls" onclick="switchTab('urls',this)">
+        URLs <span class="tab-badge" id="badge-urls">0</span>
+      </button>
+      <button class="tab-btn" data-tab="dirs" onclick="switchTab('dirs',this)">
+        Directories <span class="tab-badge" id="badge-dirs">0</span>
+      </button>
+      <button class="tab-btn" data-tab="api" onclick="switchTab('api',this)">
+        API Endpoints <span class="tab-badge" id="badge-api">0</span>
+      </button>
+      <button class="tab-btn" data-tab="findings" onclick="switchTab('findings',this)">
+        Findings <span class="tab-badge" id="badge-findings">0</span>
+      </button>
+      <button class="tab-btn" data-tab="reports" onclick="switchTab('reports',this)">Reports</button>
+    </div>
+
+    <!-- Tab Content -->
+    <div class="tab-content">
+
+      <!-- ── OVERVIEW ── -->
+      <div class="tab-pane active" id="tab-overview">
+        <div class="overview-grid">
+          <div class="glass-card">
+            <div class="card-header">Severity Distribution</div>
+            <div class="chart-wrap">
+              <canvas id="sev-chart" width="200" height="200"></canvas>
+              <div class="chart-center">
+                <div class="chart-total" id="chart-total">0</div>
+                <div class="chart-sublabel">findings</div>
+              </div>
+            </div>
+          </div>
+          <div class="glass-card">
+            <div class="card-header">Recent Critical / High Findings</div>
+            <div class="top-findings-list" id="top-findings-list">
+              <div class="empty-state">
+                <div class="empty-icon">🔍</div>
+                <div>No findings yet. Configure a target and start a scan.</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div class="header-status">
-        <div class="status-indicator" id="status-indicator">
-          <span class="status-dot" id="status-dot"></span>
-          <span class="status-label" id="status-label">Ready</span>
+      <!-- ── LIVE LOG ── -->
+      <div class="tab-pane" id="tab-log">
+        <div class="log-toolbar">
+          <div class="log-filters">
+            <button class="log-filter-btn active" data-lvl="ALL" onclick="filterLog('ALL',this)">ALL</button>
+            <button class="log-filter-btn" data-lvl="ERROR" onclick="filterLog('ERROR',this)">ERROR</button>
+            <button class="log-filter-btn" data-lvl="WARNING" onclick="filterLog('WARNING',this)">WARN</button>
+            <button class="log-filter-btn" data-lvl="INFO" onclick="filterLog('INFO',this)">INFO</button>
+          </div>
+          <div class="log-toolbar-spacer"></div>
+          <button class="btn btn-ghost btn-xs" onclick="clearLog()">Clear</button>
         </div>
-        <div class="stage-badge" id="stage-badge" style="display:none"></div>
+        <div class="log-panel" id="log-panel">
+          <div class="empty-state" id="log-empty">
+            <div class="empty-icon">📋</div>
+            <div>Logs will appear here during a scan.</div>
+          </div>
+        </div>
       </div>
 
-      <div class="header-actions">
-        <span class="target-chip" id="target-chip" style="display:none"></span>
-        <button class="btn btn-ghost" id="btn-clear" style="display:none" onclick="clearResults()">Clear</button>
+      <!-- ── SUBDOMAINS ── -->
+      <div class="tab-pane" id="tab-subdomains">
+        <div class="data-toolbar">
+          <input class="search-box" placeholder="Filter subdomains…" oninput="filterData('subdomains',this.value)" />
+          <span class="count-label" id="sub-count">0 subdomains</span>
+          <button class="btn btn-ghost btn-xs" onclick="copyData('subdomains')">Copy</button>
+        </div>
+        <div class="data-list" id="list-subdomains">
+          <div class="empty-state">
+            <div class="empty-icon">🌐</div>
+            <div>Enable Subdomain Discovery and run a scan.</div>
+          </div>
+        </div>
       </div>
-    </header>
 
-    <!-- ═══════════════════════════════ LAYOUT ══════════════════════════════ -->
-    <div class="layout">
-
-      <!-- ─────────────────────────── SIDEBAR ─────────────────────────────── -->
-      <aside class="sidebar" id="sidebar">
-        <div class="config-section">
-          <div class="config-label">Target</div>
-          <div class="input-group">
-            <input type="text" id="input-domain" class="input" placeholder="example.com"
-                   autocomplete="off" spellcheck="false" />
+      <!-- ── URLS ── -->
+      <div class="tab-pane" id="tab-urls">
+        <div class="data-toolbar">
+          <input class="search-box" placeholder="Filter URLs…" oninput="filterData('urls',this.value)" />
+          <span class="count-label" id="urls-count">0 URLs</span>
+          <button class="btn btn-ghost btn-xs" onclick="copyData('urls')">Copy</button>
+        </div>
+        <div class="data-list" id="list-urls">
+          <div class="empty-state">
+            <div class="empty-icon">🕷️</div>
+            <div>Enable URL Crawler and run a scan.</div>
           </div>
         </div>
+      </div>
 
-        <div class="config-section">
-          <div class="config-label">Modules</div>
-          <div class="module-toggles">
-            <label class="toggle-row" id="toggle-subdomains">
-              <div class="toggle-info">
-                <span class="toggle-icon">&#128269;</span>
-                <div><div class="toggle-name">Subdomains</div><div class="toggle-desc">CT logs + DNS brute-force</div></div>
-              </div>
-              <input type="checkbox" id="mod-subdomains" checked />
-              <span class="toggle-switch"></span>
-            </label>
-            <label class="toggle-row" id="toggle-crawl">
-              <div class="toggle-info">
-                <span class="toggle-icon">&#128375;</span>
-                <div><div class="toggle-name">Crawler</div><div class="toggle-desc">BFS link + JS extraction</div></div>
-              </div>
-              <input type="checkbox" id="mod-crawl" checked />
-              <span class="toggle-switch"></span>
-            </label>
-            <label class="toggle-row" id="toggle-fuzz">
-              <div class="toggle-info">
-                <span class="toggle-icon">&#128137;</span>
-                <div><div class="toggle-name">Fuzzer</div><div class="toggle-desc">Parameter injection</div></div>
-              </div>
-              <input type="checkbox" id="mod-fuzz" checked />
-              <span class="toggle-switch"></span>
-            </label>
-            <label class="toggle-row" id="toggle-api">
-              <div class="toggle-info">
-                <span class="toggle-icon">&#128268;</span>
-                <div><div class="toggle-name">API Discovery</div><div class="toggle-desc">JS analysis + path probe</div></div>
-              </div>
-              <input type="checkbox" id="mod-api" checked />
-              <span class="toggle-switch"></span>
-            </label>
-            <label class="toggle-row" id="toggle-wordlist">
-              <div class="toggle-info">
-                <span class="toggle-icon">&#129504;</span>
-                <div><div class="toggle-name">Smart Wordlist</div><div class="toggle-desc">NLP / TF-IDF generation</div></div>
-              </div>
-              <input type="checkbox" id="mod-wordlist" />
-              <span class="toggle-switch"></span>
-            </label>
-          </div>
+      <!-- ── DIRECTORIES ── -->
+      <div class="tab-pane" id="tab-dirs">
+        <div class="dir-toolbar">
+          <button class="dir-filter-btn dfb-all active" data-sf="ALL" onclick="filterDirs('ALL',this)">ALL</button>
+          <button class="dir-filter-btn dfb-200" data-sf="200" onclick="filterDirs('200',this)">200</button>
+          <button class="dir-filter-btn dfb-403" data-sf="403" onclick="filterDirs('403',this)">403</button>
+          <button class="dir-filter-btn dfb-401" data-sf="401" onclick="filterDirs('401',this)">401</button>
+          <button class="dir-filter-btn dfb-301" data-sf="301" onclick="filterDirs('301',this)">3xx</button>
+          <button class="dir-filter-btn dfb-500" data-sf="500" onclick="filterDirs('500',this)">5xx</button>
+          <div style="flex:1"></div>
+          <span class="count-label" id="dirs-count">0 paths</span>
+          <button class="btn btn-ghost btn-xs" onclick="copyData('dirs')">Copy URLs</button>
         </div>
-
-        <div class="config-section">
-          <div class="config-label collapsible-label" onclick="toggleAdvanced()">
-            Advanced <span id="adv-arrow">&#9660;</span>
-          </div>
-          <div id="advanced-panel" class="advanced-panel">
-            <div class="field-row">
-              <label class="field-label">Output Formats</label>
-              <div class="format-checks">
-                <label class="check-item"><input type="checkbox" id="fmt-json" checked> JSON</label>
-                <label class="check-item"><input type="checkbox" id="fmt-h1" checked> HackerOne</label>
-                <label class="check-item"><input type="checkbox" id="fmt-bc"> Bugcrowd</label>
-                <label class="check-item"><input type="checkbox" id="fmt-ig"> Intigriti</label>
-              </div>
-            </div>
-            <div class="field-row">
-              <label class="field-label">Rate (req/s)</label>
-              <input type="number" id="opt-rate" class="input input-sm" value="50" min="1" max="500" />
-            </div>
-            <div class="field-row">
-              <label class="field-label">Threads</label>
-              <input type="number" id="opt-threads" class="input input-sm" value="20" min="1" max="100" />
-            </div>
-            <div class="field-row">
-              <label class="field-label">Crawl Depth</label>
-              <input type="number" id="opt-depth" class="input input-sm" value="3" min="1" max="10" />
-            </div>
-            <div class="field-row">
-              <label class="field-label">Timeout (s)</label>
-              <input type="number" id="opt-timeout" class="input input-sm" value="10" min="1" max="60" />
-            </div>
-            <div class="field-row">
-              <label class="field-label">Proxy</label>
-              <input type="text" id="opt-proxy" class="input input-sm" placeholder="http://127.0.0.1:8080" />
-            </div>
-          </div>
-        </div>
-
-        <div class="sidebar-actions">
-          <button class="btn btn-scan" id="btn-scan" onclick="handleScanButton()">
-            <span class="btn-scan-icon">&#9654;</span>
-            <span id="btn-scan-label">Start Scan</span>
-          </button>
-        </div>
-      </aside>
-
-      <!-- ─────────────────────────── MAIN ────────────────────────────────── -->
-      <main class="main">
-
-        <!-- STATS BAR -->
-        <div class="stats-bar">
-          <div class="stat-card">
-            <div class="stat-icon" style="color:#8b5cf6">&#128269;</div>
-            <div class="stat-body">
-              <div class="stat-value" id="stat-subdomains">0</div>
-              <div class="stat-label">Subdomains</div>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon" style="color:#06b6d4">&#128375;</div>
-            <div class="stat-body">
-              <div class="stat-value" id="stat-urls">0</div>
-              <div class="stat-label">URLs Crawled</div>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon" style="color:#10b981">&#128268;</div>
-            <div class="stat-body">
-              <div class="stat-value" id="stat-api">0</div>
-              <div class="stat-label">API Endpoints</div>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon" style="color:#f59e0b">&#128137;</div>
-            <div class="stat-body">
-              <div class="stat-value" id="stat-findings">0</div>
-              <div class="stat-label">Total Findings</div>
-            </div>
-          </div>
-          <div class="stat-card stat-card--critical">
-            <div class="stat-icon" style="color:#ef4444">&#9888;</div>
-            <div class="stat-body">
-              <div class="stat-value" id="stat-critical">0</div>
-              <div class="stat-label">Critical</div>
-            </div>
-          </div>
-          <div class="stat-card stat-card--high">
-            <div class="stat-icon" style="color:#f97316">&#128680;</div>
-            <div class="stat-body">
-              <div class="stat-value" id="stat-high">0</div>
-              <div class="stat-label">High</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- TABS -->
-        <div class="tabs-bar">
-          <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview', this)">Overview</button>
-          <button class="tab-btn" data-tab="log" onclick="switchTab('log', this)">
-            Live Log <span class="tab-badge" id="log-count">0</span>
-          </button>
-          <button class="tab-btn" data-tab="findings" onclick="switchTab('findings', this)">
-            Findings <span class="tab-badge" id="findings-count">0</span>
-          </button>
-          <button class="tab-btn" data-tab="reports" onclick="switchTab('reports', this)">Reports</button>
-        </div>
-
-        <!-- ── TAB: OVERVIEW ── -->
-        <div class="tab-pane active" id="tab-overview">
-          <div class="overview-grid">
-            <div class="glass-card chart-card">
-              <div class="card-header">Severity Distribution</div>
-              <div class="chart-wrap">
-                <canvas id="sev-chart"></canvas>
-                <div class="chart-center" id="chart-center">
-                  <div class="chart-total" id="chart-total">0</div>
-                  <div class="chart-sublabel">findings</div>
+        <div class="dir-table-wrap">
+          <table class="dir-table" id="dirs-table">
+            <thead>
+              <tr>
+                <th style="width:70px">Status</th>
+                <th style="width:80px">Size</th>
+                <th style="width:80px">Time</th>
+                <th>URL</th>
+                <th>Detail</th>
+              </tr>
+            </thead>
+            <tbody id="dirs-tbody">
+              <tr><td colspan="5">
+                <div class="empty-state">
+                  <div class="empty-icon">📂</div>
+                  <div>Enable Directory Fuzzer and run a scan.</div>
                 </div>
-              </div>
-            </div>
-            <div class="glass-card top-findings-card">
-              <div class="card-header">Recent Critical / High Findings</div>
-              <div class="top-findings-list" id="top-findings-list">
-                <div class="empty-state">No findings yet. Start a scan.</div>
-              </div>
-            </div>
+              </td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── API ENDPOINTS ── -->
+      <div class="tab-pane" id="tab-api">
+        <div class="data-toolbar">
+          <input class="search-box" placeholder="Filter endpoints…" oninput="filterData('api',this.value)" />
+          <span class="count-label" id="api-count">0 endpoints</span>
+          <button class="btn btn-ghost btn-xs" onclick="copyData('api')">Copy</button>
+        </div>
+        <div class="data-list" id="list-api">
+          <div class="empty-state">
+            <div class="empty-icon">🔌</div>
+            <div>Enable API Discovery and run a scan.</div>
           </div>
         </div>
+      </div>
 
-        <!-- ── TAB: LIVE LOG ── -->
-        <div class="tab-pane" id="tab-log">
-          <div class="log-toolbar">
-            <div class="log-filters">
-              <button class="log-filter-btn active" data-level="ALL" onclick="filterLog('ALL', this)">ALL</button>
-              <button class="log-filter-btn" data-level="ERROR" onclick="filterLog('ERROR', this)">ERROR</button>
-              <button class="log-filter-btn" data-level="WARNING" onclick="filterLog('WARNING', this)">WARN</button>
-              <button class="log-filter-btn" data-level="INFO" onclick="filterLog('INFO', this)">INFO</button>
-            </div>
-            <button class="btn btn-ghost btn-xs" onclick="clearLog()">Clear log</button>
+      <!-- ── FINDINGS ── -->
+      <div class="tab-pane" id="tab-findings">
+        <div class="findings-toolbar">
+          <div class="sev-filters">
+            <button class="sev-btn sev-btn-all active" data-sev="ALL" onclick="filterFindings('ALL',this)">ALL</button>
+            <button class="sev-btn sev-btn-critical" data-sev="CRITICAL" onclick="filterFindings('CRITICAL',this)">CRITICAL</button>
+            <button class="sev-btn sev-btn-high" data-sev="HIGH" onclick="filterFindings('HIGH',this)">HIGH</button>
+            <button class="sev-btn sev-btn-medium" data-sev="MEDIUM" onclick="filterFindings('MEDIUM',this)">MEDIUM</button>
+            <button class="sev-btn sev-btn-low" data-sev="LOW" onclick="filterFindings('LOW',this)">LOW</button>
           </div>
-          <div class="log-panel" id="log-panel"></div>
+          <div style="flex:1"></div>
+          <span class="count-label" id="findings-count-lbl">0 findings</span>
         </div>
-
-        <!-- ── TAB: FINDINGS ── -->
-        <div class="tab-pane" id="tab-findings">
-          <div class="findings-toolbar">
-            <div class="sev-filters" id="sev-filters">
-              <button class="sev-btn active" data-sev="ALL" onclick="filterFindings('ALL', this)">ALL</button>
-              <button class="sev-btn sev-critical" data-sev="CRITICAL" onclick="filterFindings('CRITICAL', this)">CRITICAL</button>
-              <button class="sev-btn sev-high" data-sev="HIGH" onclick="filterFindings('HIGH', this)">HIGH</button>
-              <button class="sev-btn sev-medium" data-sev="MEDIUM" onclick="filterFindings('MEDIUM', this)">MEDIUM</button>
-              <button class="sev-btn sev-low" data-sev="LOW" onclick="filterFindings('LOW', this)">LOW</button>
-            </div>
-            <div class="pagination-info" id="pag-info"></div>
-          </div>
-          <div class="table-wrap">
-            <table class="findings-table" id="findings-table">
-              <thead>
-                <tr>
-                  <th style="width:90px">Severity</th>
-                  <th style="width:130px">Category</th>
-                  <th>URL</th>
-                  <th style="width:100px">Param</th>
-                  <th style="width:200px">Detail</th>
-                </tr>
-              </thead>
-              <tbody id="findings-tbody">
-                <tr><td colspan="5" class="empty-cell">No findings yet. Start a scan.</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="pagination-bar" id="pag-bar" style="display:none">
-            <button class="btn btn-ghost btn-xs" id="pag-prev" onclick="prevPage()">&#8592; Prev</button>
-            <span id="pag-page" class="pag-page"></span>
-            <button class="btn btn-ghost btn-xs" id="pag-next" onclick="nextPage()">Next &#8594;</button>
-          </div>
+        <div class="findings-table-wrap">
+          <table class="findings-table" id="findings-table">
+            <thead>
+              <tr>
+                <th style="width:85px">Severity</th>
+                <th style="width:140px">Category</th>
+                <th>URL</th>
+                <th style="width:90px">Param</th>
+                <th style="width:200px">Detail</th>
+              </tr>
+            </thead>
+            <tbody id="findings-tbody">
+              <tr><td colspan="5">
+                <div class="empty-state">
+                  <div class="empty-icon">🚨</div>
+                  <div>No security findings yet. Run a scan.</div>
+                </div>
+              </td></tr>
+            </tbody>
+          </table>
         </div>
+        <div class="pagination" id="pag-bar" style="display:none">
+          <button class="btn btn-ghost btn-xs" id="pag-prev" onclick="changePage(-1)">← Prev</button>
+          <span class="pag-info" id="pag-info"></span>
+          <button class="btn btn-ghost btn-xs" id="pag-next" onclick="changePage(1)">Next →</button>
+        </div>
+      </div>
 
-        <!-- ── TAB: REPORTS ── -->
-        <div class="tab-pane" id="tab-reports">
-          <div class="reports-panel">
-            <div class="reports-header">
-              <span>Generated report files</span>
-              <button class="btn btn-ghost btn-xs" onclick="loadReports()">&#8635; Refresh</button>
-            </div>
-            <div class="reports-list" id="reports-list">
-              <div class="empty-state">No reports yet. Complete a scan first.</div>
-            </div>
+      <!-- ── REPORTS ── -->
+      <div class="tab-pane" id="tab-reports">
+        <div class="reports-header">
+          <div class="reports-title">Generated Reports</div>
+          <div class="reports-actions">
+            <button class="btn btn-ghost" onclick="loadReports()">↻ Refresh</button>
+            <button class="btn-download-all" id="btn-zip" onclick="downloadZip()" style="display:none">
+              ⬇ Download All (ZIP)
+            </button>
           </div>
         </div>
+        <div class="reports-grid" id="reports-grid">
+          <div class="empty-state">
+            <div class="empty-icon">📊</div>
+            <div>No reports yet. Complete a scan to generate reports.</div>
+          </div>
+        </div>
+      </div>
 
-      </main>
-    </div><!-- /.layout -->
-  </div><!-- /.app -->
+    </div><!-- /tab-content -->
+  </main><!-- /main -->
 
-  <script src="/static/js/app.js"></script>
+</div><!-- /app -->
+
+<!-- Toast container -->
+<div class="toast-container" id="toast-container"></div>
+
+<script src="/static/js/app.js"></script>
 </body>
 </html>
