@@ -13,6 +13,7 @@ reports/*.md
 reports/*.pdf
 reports/*.db
 fuzzphantom_resume_*.json
+personal_docs/
 .env
 .venv/
 venv/
